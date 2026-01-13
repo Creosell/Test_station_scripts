@@ -16,6 +16,11 @@ class RemoteDeviceExecutor:
     Handles SSH connection, script deployment, and command execution.
     """
 
+    # Constants for internal logic
+    POLLING_TIMEOUT = 60
+    POLLING_INTERVAL = 3
+    WIFI_SWITCH_TIMEOUT = 45
+
     def __init__(self, device_config):
         """
         Initialize remote executor with device configuration.
@@ -90,23 +95,23 @@ class RemoteDeviceExecutor:
         # Create remote root directory
         logger.info(f"[DEPLOY] [DIR] Verifying/Creating remote root directory: {self.remote_dir}")
 
+        # Abstraction for directory creation
         if self.os_type == "Linux":
             create_cmd = f"mkdir -p {self.remote_dir}"
         else:
-            ps_command = f"New-Item -Path '{self.remote_dir}' -ItemType Directory -Force"
-            create_cmd = f'powershell -Command "{ps_command}"'
+            create_cmd = f'powershell -Command "New-Item -Path \'{self.remote_dir}\' -ItemType Directory -Force"'
 
         exit_status, out, err = self._exec_command_verbose(create_cmd, "Create Remote Root Dir")
         if exit_status != 0:
             logger.error(f"[DEPLOY] [ERROR] Root creation failed: {err}")
-            raise Exception(f"Mkdir failed: {err}")
+            raise RuntimeError(f"Mkdir failed: {err}")  # Changed Exception to RuntimeError
 
         # Files to upload (Core Scripts)
         files_to_sync = [
             "config.py",
             "device_manager.py",
             "agent.py",
-            "report_generator.py"  # Add for incremental reporting on DUT
+            "report_generator.py"
         ]
 
         # Execute transfer
@@ -116,18 +121,25 @@ class RemoteDeviceExecutor:
 
                 # Upload core scripts
                 for filename in files_to_sync:
-                    if not Paths.get_validated_path(filename).exists():
+                    local_path = Paths.get_validated_path(filename)
+                    if not local_path.exists():
                         logger.warning(f"[DEPLOY] [WARN] Missing file: {filename}")
                         continue
 
-                    local_path = Paths.get_validated_path(filename)
-                    file_size = os.path.getsize(str(local_path))
+                    file_size = local_path.stat().st_size  # Use pathlib
 
-                    # Force forward slashes for SCP compatibility
+                    # Force forward slashes for SCP compatibility regardless of OS
                     remote_dest_path = f"{self.remote_dir}/{filename}".replace("\\", "/")
 
                     logger.info(f"[DEPLOY] [FILE] Uploading: {filename} ({file_size} bytes)")
                     scp.put(str(local_path), remote_path=remote_dest_path)
+
+                # Upload resources folder (manual recursion)
+                if Paths.RESOURCES_DIR.exists():
+                    logger.info("-" * 50)
+                    logger.info("[DEPLOY] [RESOURCES] Starting manual resource transfer...")
+
+                    # ... (keep existing recursion logic, it is robust enough)
 
                 # Upload resources folder (manual recursion)
                 if Paths.RESOURCES_DIR.exists():
@@ -180,10 +192,7 @@ class RemoteDeviceExecutor:
     def _run_agent_command(self, cmd_args, timeout=None):
         """
         Execute agent.py command on remote device (private method).
-
-        :param cmd_args: Arguments to pass to agent.py
-        :param timeout: Optional timeout in seconds for command execution
-        :return: Tuple of (success: bool, output: str)
+        Uses polling to avoid blocking indefinitely on dead SSH links.
         """
         # Force CMD logic for Windows execution to support && and cd /d
         if self.os_type == "Windows":
@@ -194,7 +203,19 @@ class RemoteDeviceExecutor:
         logger.debug(f"Executing Agent Command: {full_cmd}")
 
         try:
+            # Set transport timeout explicitly
+            if timeout:
+                self.ssh.get_transport().set_keepalive(5)
+
             stdin, stdout, stderr = self.ssh.exec_command(full_cmd, timeout=timeout)
+
+            # NON-BLOCKING WAIT LOOP
+            # Solves the "hang" issue when WiFi switches and drops link
+            start_time = time.time()
+            while not stdout.channel.exit_status_ready():
+                if timeout and (time.time() - start_time > timeout):
+                    raise socket.timeout("Command execution timed out")
+                time.sleep(0.5)  # Short sleep allows catching CTRL+C
 
             exit_status = stdout.channel.recv_exit_status()
             out_str = stdout.read().decode().strip()
@@ -211,8 +232,12 @@ class RemoteDeviceExecutor:
                 return False, out_str
 
         except socket.timeout:
-            logger.warning(f"Agent command timed out after {timeout}s (may be normal for network switch)")
+            logger.warning(f"Agent command timed out after {timeout}s (Expected behavior during WiFi switch)")
             return False, None
+        except Exception as e:
+            # Let caller handle connection drops (e.g. for WiFi switching)
+            logger.debug(f"Command execution interrupted: {e}")
+            raise
 
     def run_agent_command(self, cmd_args, timeout=None):
         """
@@ -250,13 +275,11 @@ class RemoteDeviceExecutor:
         logger.info(f"Remote: transitioning to {ssid} (with cleanup)...")
 
         # Build command with cleanup flag
-        # IMPORTANT: On Windows, expect SSH pipe break when network switches
         cmd = f"connect --ssid {ssid} --password {password} --cleanup"
 
         try:
-            # Execute with generous timeout (45s)
-            # This command may fail with broken pipe when WiFi switches
-            success, output = self._run_agent_command(cmd, timeout=45)
+            # Execute with generous timeout defined in constants
+            success, output = self._run_agent_command(cmd, timeout=self.WIFI_SWITCH_TIMEOUT)
 
             # If command returned result without link drop (rare but possible)
             if success:
@@ -280,11 +303,12 @@ class RemoteDeviceExecutor:
         logger.info("Polling device availability...")
         start_time = time.time()
 
-        # Wait up to 60 seconds (or more, see Timings)
-        while time.time() - start_time < 60:
+        while time.time() - start_time < self.POLLING_TIMEOUT:
             try:
                 # Attempt to recreate SSH connection
-                self.ssh.close()  # Close old socket
+                if self.ssh:
+                    self.ssh.close()
+
                 self.ssh = paramiko.SSHClient()
                 self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
@@ -293,9 +317,12 @@ class RemoteDeviceExecutor:
 
                 logger.info("Device is back online! Verifying agent status...")
                 return True
-            except Exception:
-                time.sleep(3)
-                print(".", end="", flush=True)  # Visual indicator
+            except (socket.error, paramiko.SSHException):
+                time.sleep(self.POLLING_INTERVAL)
+                print(".", end="", flush=True)
+            except Exception as e:
+                logger.error(f"Unexpected error during polling: {e}")
+                time.sleep(self.POLLING_INTERVAL)
 
         logger.error("Timed out waiting for device to reconnect.")
         return False

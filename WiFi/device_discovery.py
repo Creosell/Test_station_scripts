@@ -308,12 +308,12 @@ if __name__ == "__main__":
     ROUTER_CONFIG = {
         'ip': '192.168.50.1',
         'user': 'root',
-        'password': 'your_router_password'
+        'password': '66668888'
     }
 
     MASTER_STATION_IP = '192.168.50.100'  # IP to exclude
     DEFAULT_SSH_USER = 'Administrator'
-    DEFAULT_SSH_PASSWORD = 'your_password'
+    DEFAULT_SSH_PASSWORD = '66668888'
 
     # Run discovery
     discovery = DeviceDiscovery(ROUTER_CONFIG, MASTER_STATION_IP)
