@@ -1,18 +1,22 @@
-# ... (Imports unchanged) ...
 import os
 import time
 import subprocess
 import logging
 import platform
-from tenacity import retry, stop_after_attempt, wait_fixed
 from config import NetworkConfig, Timings, Limits, NETWORKS, Paths
 
 logger = logging.getLogger("DeviceMgr")
 
 
 class DeviceManager:
-    # ... (init unchanged) ...
+    """
+    Manages network interfaces and connections on the local device (Agent side).
+    """
+
     def __init__(self):
+        """
+        Initializes the DeviceManager, detects OS, and prepares necessary directories.
+        """
         self.os_type = platform.system()
         logger.info(f"Detected OS: {self.os_type}")
 
@@ -23,8 +27,13 @@ class DeviceManager:
             os.makedirs(str(Paths.PROFILES_DIR), exist_ok=True)
 
     def _create_windows_profile(self, ssid, password):
-        """Generates XML profile for Windows in the resources/wifi_profiles folder."""
-        # ... (XML string content unchanged) ...
+        """
+        Generates XML profile for Windows in the resources/wifi_profiles folder.
+
+        :param ssid: The SSID of the network.
+        :param password: The password for the network.
+        :return: Path to the created XML profile as a string.
+        """
         xml_content = f"""<?xml version="1.0"?>
 <WLANProfile xmlns="http://www.microsoft.com/networking/WLAN/profile/v1">
   <name>{ssid}</name>
@@ -58,9 +67,10 @@ class DeviceManager:
             logger.error(f"Failed to create profile {file_path}: {e}")
             raise
 
-    # ... (forget_all_networks unchanged) ...
     def forget_all_networks(self):
-        """Removes profiles for all configured networks."""
+        """
+        Removes profiles for all configured networks based on the OS.
+        """
         for config in NETWORKS.values():
             name = config["ssid"]
             if self.os_type == "Linux":
@@ -68,44 +78,88 @@ class DeviceManager:
             elif self.os_type == "Windows":
                 subprocess.run(["netsh", "wlan", "delete", "profile", f"name={name}"], capture_output=True)
 
-    @retry(stop=stop_after_attempt(Limits.WIFI_CONNECT_RETRIES), wait=wait_fixed(2))
-    def connect_wifi(self, ssid, password):
-        # ... (Linux part unchanged) ...
-        logger.info(f"Connecting to {ssid}...")
+    def connect_wifi(self, ssid, password, cleanup=False):
+        """
+        Connects to WiFi. If cleanup=True, it removes other profiles explicitly.
+        CRITICAL: On Windows, removing the active profile drops the connection immediately.
+        This script assumes it continues running locally even if SSH drops.
+        """
+        last_exception = None
 
-        if self.os_type == "Linux":
-            subprocess.run(['nmcli', 'radio', 'wifi', 'off'], capture_output=True)
-            time.sleep(Timings.WIFI_TOGGLE_DELAY)
-            subprocess.run(['nmcli', 'radio', 'wifi', 'on'], capture_output=True)
-            time.sleep(Timings.WIFI_TOGGLE_DELAY)
-            res = subprocess.run(['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password],
-                                 capture_output=True, text=True)
-
-        elif self.os_type == "Windows":
-            # Check if profile exists
+        # 1. Предварительное создание профиля (чтобы было к чему коннектиться после удаления)
+        if self.os_type == "Windows":
+            # Всегда обновляем/создаем профиль целевой сети ПЕРЕД удалением остальных
+            self._create_windows_profile(ssid, password)
             profile_path = Paths.PROFILES_DIR / f"{ssid}.xml"
-
-            if not profile_path.exists():
-                self._create_windows_profile(ssid, password)
-
-            # Convert Path to string for subprocess
             subprocess.run(['netsh', 'wlan', 'add', 'profile', f'filename={str(profile_path)}'], capture_output=True)
-            time.sleep(Timings.PROFILE_ADD_DELAY)
-            res = subprocess.run(['netsh', 'wlan', 'connect', f'name={ssid}'], capture_output=True, text=True)
-        else:
-            raise NotImplementedError("OS not supported")
 
-        time.sleep(Timings.WIFI_CONNECTION_TIMEOUT)
+        # 2. Очистка старых сетей (если запрошено)
+        if cleanup:
+            logger.info("Cleaning up old profiles...")
+            # Важно: Не удаляем профиль, который только что создали (ssid)
+            if self.os_type == "Windows":
+                # Получаем список всех профилей
+                res = subprocess.run(['netsh', 'wlan', 'show', 'profiles'], capture_output=True, text=True)
+                for line in res.stdout.split('\n'):
+                    if "All User Profile" in line:
+                        p_name = line.split(":", 1)[1].strip()
+                        if p_name != ssid:  # Не удаляем целевую сеть
+                            subprocess.run(["netsh", "wlan", "delete", "profile", f"name={p_name}"],
+                                           capture_output=True)
+            elif self.os_type == "Linux":
+                # Для Linux (NetworkManager) логика может быть сложнее, но принцип тот же
+                # Здесь упрощенно: удаляем все, кроме текущего (если реализуете)
+                pass
 
-        if self._verify_connection(ssid):
-            logger.info(f"Connected to {ssid}")
-            return True
-        else:
-            logger.error(f"Failed to connect. Stderr: {res.stderr if res.stderr else 'None'}")
-            raise Exception(f"Connection failed: {ssid}")
+                # 3. Цикл подключения (как и было раньше, но без создания профиля внутри цикла, т.к. сделали выше)
+        for attempt in range(1, Limits.WIFI_CONNECT_RETRIES + 1):
+            try:
+                # --- ИЗМЕНЕНИЕ: Безопасное логирование ---
+                try:
+                    logger.info(f"Connecting to {ssid} (Attempt {attempt})...")
+                except OSError:
+                    pass  #
 
-    # ... (_verify_connection unchanged) ...
+                if self.os_type == "Linux":
+                    # ... (код linux без изменений)
+                    subprocess.run(['nmcli', 'radio', 'wifi', 'off'], capture_output=True)
+                    time.sleep(Timings.WIFI_TOGGLE_DELAY)
+                    subprocess.run(['nmcli', 'radio', 'wifi', 'on'], capture_output=True)
+                    time.sleep(Timings.WIFI_TOGGLE_DELAY)
+                    res = subprocess.run(['nmcli', 'device', 'wifi', 'connect', ssid, 'password', password],
+                                         capture_output=True, text=True)
+
+                elif self.os_type == "Windows":
+                    # Профиль уже создан на шаге 1
+                    time.sleep(Timings.PROFILE_ADD_DELAY)
+                    res = subprocess.run(['netsh', 'wlan', 'connect', f'name={ssid}'], capture_output=True, text=True)
+
+                # Ждем подключения
+                time.sleep(Timings.WIFI_CONNECTION_TIMEOUT)
+
+                if self._verify_connection(ssid):
+                    logger.info(f"Connected to {ssid}")
+                    return True
+                else:
+                    error_msg = res.stderr if res.stderr else 'Unknown error'
+                    logger.warning(f"Connection attempt {attempt} failed. Output: {res.stdout}")
+                    raise Exception(f"Connection failed: {ssid}")
+
+            except Exception as e:
+                last_exception = e
+                time.sleep(2)
+
+        if last_exception:
+            raise last_exception
+        return False
+
     def _verify_connection(self, expected_ssid):
+        """
+        Verifies if the current active connection matches the expected SSID.
+
+        :param expected_ssid: The SSID to check against.
+        :return: True if connected to expected_ssid, False otherwise.
+        """
         if self.os_type == "Linux":
             cmd = ['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi']
         elif self.os_type == "Windows":
@@ -126,8 +180,11 @@ class DeviceManager:
         return False
 
     def run_iperf(self):
-        """Runs iperf3 test using the executable from resources folder on Windows."""
+        """
+        Runs iperf3 test using the executable from resources folder on Windows or system iperf3 on Linux.
 
+        :return: The stdout output of the iperf command or None if failed.
+        """
         if self.os_type == "Windows":
             iperf_path = Paths.IPERF_EXE_WIN
             if not iperf_path.exists():

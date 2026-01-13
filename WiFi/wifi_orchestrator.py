@@ -58,8 +58,9 @@ class WiFiTestOrchestrator:
         standards = WIFI_STANDARDS_2G if band_name == "2G" else WIFI_STANDARDS_5G
 
         # Initial connection
-        device_executor.forget_all_networks()
-        device_executor.connect_wifi(ssid, net_config["password"])
+        if not device_executor.connect_wifi(ssid, net_config["password"]):
+            logger.error("Failed to establish initial connection")
+            return
 
         for standard in standards:
             logger.info(f"Testing Standard: {standard}")

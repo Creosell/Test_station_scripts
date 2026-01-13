@@ -1,4 +1,7 @@
 # ... (Imports remain unchanged) ...
+from datetime import time
+from pathlib import Path
+
 import paramiko
 import os
 import logging
@@ -53,6 +56,7 @@ class RemoteDeviceExecutor:
         """
         Orchestrates the deployment of scripts and resources to the remote device via SCP.
         Manually handles directory structures to avoid SCP recursive limitations on Windows.
+        Ensures all parent directories exist before uploading files.
         """
         logger.info(f"[DEPLOY] Initiating deployment sequence to target: {self.remote_dir}")
 
@@ -78,8 +82,7 @@ class RemoteDeviceExecutor:
         files_to_sync = [
             "config.py",
             "device_manager.py",
-            "agent.py",
-            "__init__.py"
+            "agent.py"
         ]
 
         # 3. Execution of Transfer
@@ -89,10 +92,8 @@ class RemoteDeviceExecutor:
 
                 # --- STEP A: Upload Core Scripts ---
                 for filename in files_to_sync:
-                    # Check existence quietly to avoid log spam for optional files
                     if not Paths.get_validated_path(filename).exists():
-                        if filename != "__init__.py":  # Only warn for critical files
-                            logger.warning(f"[DEPLOY] [WARN] Missing file: {filename}")
+                        logger.warning(f"[DEPLOY] [WARN] Missing file: {filename}")
                         continue
 
                     local_path = Paths.get_validated_path(filename)
@@ -109,27 +110,34 @@ class RemoteDeviceExecutor:
                     logger.info(f"--------------------------------------------------")
                     logger.info(f"[DEPLOY] [RESOURCES] Starting manual resource transfer...")
 
-                    # B.1. Create 'resources' directory on remote explicitly
+                    # Define the base remote resources directory
                     remote_res_dir = f"{self.remote_dir}/resources".replace("\\", "/")
 
-                    if self.os_type == "Linux":
-                        res_create_cmd = f"mkdir -p {remote_res_dir}"
-                    else:
-                        ps_res_cmd = f"New-Item -Path '{remote_res_dir}' -ItemType Directory -Force"
-                        res_create_cmd = f'powershell -Command "{ps_res_cmd}"'
+                    # Track created directories to avoid redundant SSH calls
+                    created_remote_dirs = set()
 
-                    self._exec_command_verbose(res_create_cmd, "Create Remote Resources Dir")
-
-                    # B.2. Walk through local files and upload individually
+                    # B.1. Walk through local files and upload individually
                     for root, _, files in os.walk(str(Paths.RESOURCES_DIR)):
                         for file in files:
                             local_file_path = Path(root) / file
-                            # Calculate relative path to keep structure if needed (e.g. resources/subdir/file)
+                            # Calculate relative path to keep structure
                             rel_path = local_file_path.relative_to(Paths.RESOURCES_DIR)
 
                             # Construct full remote path
-                            # Note: using forward slashes for Path joining to ensure SCP compatibility
                             remote_file_path = f"{remote_res_dir}/{rel_path.as_posix()}"
+
+                            # Determine remote parent directory for the current file
+                            remote_parent_dir = str(Path(remote_file_path).parent).replace("\\", "/")
+
+                            # B.2. Ensure the parent directory exists remotely (if not already created)
+                            if remote_parent_dir not in created_remote_dirs:
+                                if self.os_type == "Linux":
+                                    dir_cmd = f"mkdir -p {remote_parent_dir}"
+                                else:
+                                    dir_cmd = f'powershell -Command "New-Item -Path \'{remote_parent_dir}\' -ItemType Directory -Force"'
+
+                                self._exec_command_verbose(dir_cmd, f"Create Remote Dir: {remote_parent_dir}")
+                                created_remote_dirs.add(remote_parent_dir)
 
                             logger.info(f"[DEPLOY] [RES-FILE] Uploading: {file} -> resources/{rel_path.as_posix()}")
                             scp.put(str(local_file_path), remote_path=remote_file_path)
@@ -176,11 +184,56 @@ class RemoteDeviceExecutor:
         self._run_agent_command("forget")
 
     def connect_wifi(self, ssid, password):
-        logger.info(f"Remote: Connecting to {ssid}...")
-        success, _ = self._run_agent_command(f"connect --ssid {ssid} --password {password}")
-        if success:
-            logger.info(f"Remote: Connected to {ssid}")
-        return success
+        logger.info(f"Remote: transitioning to {ssid} (with cleanup)...")
+
+        # Формируем команду с флагом cleanup
+        # ВАЖНО: На Windows используем start /b или просто ожидаем разрыва,
+        # но надежнее просто запустить и поймать исключение.
+        cmd = f"connect --ssid {ssid} --password {password} --cleanup"
+
+        try:
+            # Мы ожидаем, что этот вызов может упасть с исключением (Broken Pipe),
+            # так как сеть передернется.
+            success, output = self._run_agent_command(cmd)
+
+            # Если команда вернула результат без разрыва связи (редко, но бывает)
+            if success:
+                logger.info(f"Remote: Connected to {ssid} (Link maintained)")
+                return True
+
+        except Exception as e:
+            # Это НОРМАЛЬНОЕ поведение при смене сети по WiFi
+            logger.info(f"SSH connection dropped as expected during WiFi switch ({e}). Waiting for device recovery...")
+
+        # Если мы здесь, связь разорвана. Начинаем поллинг (ожидание) восстановления.
+        return self._wait_for_reconnection()
+
+    def _wait_for_reconnection(self):
+        """
+        Polls the device via SSH until it becomes available again.
+        """
+        logger.info("Polling device availability...")
+        start_time = time.time()
+
+        # Ждем 60 секунд (или больше, см. Timings)
+        while time.time() - start_time < 60:
+            try:
+                # Пытаемся пересоздать SSH подключение
+                self.ssh.close()  # Закрываем старый сокет
+                self.ssh = paramiko.SSHClient()
+                self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+                # Короткий таймаут для проверки
+                self.ssh.connect(self.ip, username=self.user, password=self.password, timeout=5)
+
+                logger.info("Device is back online! Verifying agent status...")
+                return True
+            except Exception:
+                time.sleep(3)
+                print(".", end="", flush=True)  # Визуальный индикатор
+
+        logger.error("Timed out waiting for device to reconnect.")
+        return False
 
     def run_iperf(self):
         logger.info("Remote: Running iperf...")

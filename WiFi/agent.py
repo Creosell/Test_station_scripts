@@ -16,7 +16,7 @@ def main():
     # Command: connect
     cmd_connect = subparsers.add_parser("connect")
     cmd_connect.add_argument("--ssid", required=True)
-    cmd_connect.add_argument("--password", required=True)
+    cmd_connect.add_argument("--cleanup", action="store_true", help="Forget other networks before connecting")
 
     # Command: iperf
     cmd_iperf = subparsers.add_parser("iperf")
@@ -31,7 +31,7 @@ def main():
 
     try:
         if args.command == "connect":
-            success = dm.connect_wifi(args.ssid, args.password)
+            success = dm.connect_wifi(args.ssid, args.password, cleanup=args.cleanup)
             if success:
                 print("RESULT:SUCCESS")
             else:
