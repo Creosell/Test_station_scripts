@@ -28,6 +28,27 @@ def main():
     # Command: sysinfo
     cmd_sysinfo = subparsers.add_parser("sysinfo", help="Get system product name")
 
+    # Command: prevent_sleep
+    cmd_prevent_sleep = subparsers.add_parser("prevent_sleep", help="Prevent system sleep/screen timeout")
+
+    # Command: allow_sleep
+    cmd_allow_sleep = subparsers.add_parser("allow_sleep", help="Re-enable system sleep/screen timeout")
+
+    # Command: init_report
+    cmd_init_report = subparsers.add_parser("init_report", help="Initialize HTML report on DUT")
+    cmd_init_report.add_argument("--device_name", required=True)
+    cmd_init_report.add_argument("--ip_address", required=True)
+    cmd_init_report.add_argument("--report_dir", required=True)
+
+    # Command: add_result
+    cmd_add_result = subparsers.add_parser("add_result", help="Add test result to report")
+    cmd_add_result.add_argument("--report_path", required=True)
+    cmd_add_result.add_argument("--band", required=True)
+    cmd_add_result.add_argument("--ssid", required=True)
+    cmd_add_result.add_argument("--standard", required=True)
+    cmd_add_result.add_argument("--channel", type=int, required=True)
+    cmd_add_result.add_argument("--iperf_output", required=True)
+
     args = parser.parse_args()
 
     # Initialize DeviceManager (it will detect OS locally)
@@ -59,6 +80,46 @@ def main():
             product_name = dm.get_system_product_name()
             print(f"SYSTEM_PRODUCT:{product_name}")
             print("RESULT:SUCCESS")
+
+        elif args.command == "prevent_sleep":
+            success = dm.prevent_sleep()
+            if success:
+                print("RESULT:SUCCESS")
+            else:
+                print("RESULT:FAILURE")
+                sys.exit(1)
+
+        elif args.command == "allow_sleep":
+            success = dm.allow_sleep()
+            if success:
+                print("RESULT:SUCCESS")
+            else:
+                print("RESULT:FAILURE")
+                sys.exit(1)
+
+        elif args.command == "init_report":
+            report_path = dm.initialize_report(args.device_name, args.ip_address, args.report_dir)
+            if report_path:
+                print(f"REPORT_PATH:{report_path}")
+                print("RESULT:SUCCESS")
+            else:
+                print("RESULT:FAILURE")
+                sys.exit(1)
+
+        elif args.command == "add_result":
+            success = dm.add_test_result(
+                args.report_path,
+                args.band,
+                args.ssid,
+                args.standard,
+                args.channel,
+                args.iperf_output
+            )
+            if success:
+                print("RESULT:SUCCESS")
+            else:
+                print("RESULT:FAILURE")
+                sys.exit(1)
 
     except Exception as e:
         print(f"ERROR:{str(e)}")

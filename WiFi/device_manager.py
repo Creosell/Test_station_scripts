@@ -27,7 +27,7 @@ class DeviceManager:
     def get_system_product_name(self):
         """
         Retrieves system product name (manufacturer model).
-
+        
         :return: System product name string or "Unknown" if retrieval fails
         """
         try:
@@ -38,7 +38,7 @@ class DeviceManager:
                 res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
                 if res.returncode == 0 and res.stdout.strip():
                     return res.stdout.strip()
-
+            
             elif self.os_type == "Linux":
                 # Try dmidecode first (requires root/sudo)
                 try:
@@ -48,7 +48,7 @@ class DeviceManager:
                         return res.stdout.strip()
                 except:
                     pass
-
+                
                 # Fallback: read from /sys filesystem
                 try:
                     with open('/sys/devices/virtual/dmi/id/product_name', 'r') as f:
@@ -57,13 +57,262 @@ class DeviceManager:
                             return product
                 except:
                     pass
-
+            
             # Fallback: use hostname
             return platform.node()
-
+        
         except Exception as e:
             logger.warning(f"Could not retrieve system product name: {e}")
             return "Unknown"
+
+    def prevent_sleep(self):
+        """
+        Prevent system sleep and screen timeout during testing.
+        
+        :return: True if successful, False otherwise
+        """
+        try:
+            if self.os_type == "Windows":
+                # Set power plan to High Performance and disable sleep/display timeout
+                commands = [
+                    # Set active power scheme to High Performance
+                    'powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c',
+                    # Disable monitor timeout (AC)
+                    'powercfg /change monitor-timeout-ac 0',
+                    # Disable sleep timeout (AC)
+                    'powercfg /change standby-timeout-ac 0',
+                    # Disable monitor timeout (DC/battery)
+                    'powercfg /change monitor-timeout-dc 0',
+                    # Disable sleep timeout (DC/battery)
+                    'powercfg /change standby-timeout-dc 0'
+                ]
+                
+                for cmd in commands:
+                    subprocess.run(cmd.split(), capture_output=True)
+                
+                logger.info("Sleep prevention enabled (High Performance mode)")
+                return True
+            
+            elif self.os_type == "Linux":
+                # Disable DPMS screen blanking
+                try:
+                    subprocess.run(['xset', 's', 'off'], capture_output=True)
+                    subprocess.run(['xset', '-dpms'], capture_output=True)
+                    logger.info("Sleep prevention enabled (DPMS disabled)")
+                    return True
+                except:
+                    logger.warning("Could not disable screen blanking (xset not available)")
+                    return False
+            
+            return False
+        
+        except Exception as e:
+            logger.warning(f"Failed to prevent sleep: {e}")
+            return False
+
+    def allow_sleep(self):
+        """
+        Re-enable system sleep and screen timeout after testing.
+        
+        :return: True if successful, False otherwise
+        """
+        try:
+            if self.os_type == "Windows":
+                # Restore default timeouts (15 min display, 30 min sleep for AC)
+                commands = [
+                    'powercfg /change monitor-timeout-ac 15',
+                    'powercfg /change standby-timeout-ac 30',
+                    'powercfg /change monitor-timeout-dc 5',
+                    'powercfg /change standby-timeout-dc 15'
+                ]
+                
+                for cmd in commands:
+                    subprocess.run(cmd.split(), capture_output=True)
+                
+                logger.info("Sleep prevention disabled (timeouts restored)")
+                return True
+            
+            elif self.os_type == "Linux":
+                # Re-enable DPMS
+                try:
+                    subprocess.run(['xset', 's', 'on'], capture_output=True)
+                    subprocess.run(['xset', '+dpms'], capture_output=True)
+                    logger.info("Sleep prevention disabled (DPMS restored)")
+                    return True
+                except:
+                    return False
+            
+            return False
+        
+        except Exception as e:
+            logger.warning(f"Failed to allow sleep: {e}")
+            return False
+
+    def initialize_report(self, device_name, ip_address, report_dir):
+        """
+        Initialize HTML report on DUT for incremental updates.
+        Creates empty report file with device info.
+        
+        :param device_name: System product name
+        :param ip_address: Device IP address
+        :param report_dir: Directory path for report storage
+        :return: Report file path or None if failed
+        """
+        try:
+            # Import ReportGenerator locally (only available on DUT after deployment)
+            from report_generator import ReportGenerator
+            from pathlib import Path
+            
+            # Ensure report directory exists
+            report_path = Path(report_dir)
+            report_path.mkdir(parents=True, exist_ok=True)
+            
+            # Generate report filename
+            report_filename = ReportGenerator.generate_report_filename(device_name, ip_address)
+            full_path = report_path / report_filename
+            
+            # Find template (should be deployed to resources/)
+            if self.os_type == "Windows":
+                template_path = Path(__file__).parent / "resources" / "report_template.html"
+            else:
+                template_path = Path("/tmp/wifi_test_agent/resources/report_template.html")
+            
+            # Create initial report
+            report_gen = ReportGenerator(template_path, full_path)
+            report_gen.generate(device_name, ip_address)
+            
+            logger.info(f"Report initialized: {full_path}")
+            return str(full_path)
+        
+        except Exception as e:
+            logger.error(f"Failed to initialize report: {e}")
+            return None
+
+    def add_test_result(self, report_path, band, ssid, standard, channel, iperf_output):
+        """
+        Add test result to existing HTML report and regenerate.
+        
+        :param report_path: Path to existing report file
+        :param band: Frequency band (e.g., "2.4 GHz")
+        :param ssid: Network SSID
+        :param standard: WiFi standard (e.g., "802.11n")
+        :param channel: Channel number
+        :param iperf_output: Raw iperf output string (may be base64 encoded)
+        :return: True if successful, False otherwise
+        """
+        try:
+            from report_generator import ReportGenerator
+            from pathlib import Path
+            import base64
+            import json
+            
+            # Decode iperf output if base64 encoded
+            try:
+                iperf_decoded = base64.b64decode(iperf_output).decode()
+            except:
+                # Not base64, use as-is
+                iperf_decoded = iperf_output
+            
+            report_file = Path(report_path)
+            if not report_file.exists():
+                logger.error(f"Report file not found: {report_path}")
+                return False
+            
+            # Extract device name and IP from filename
+            # Format: DeviceName_IP_Timestamp.html
+            filename = report_file.stem
+            parts = filename.rsplit('_', 2)
+            device_name = parts[0].replace('-', ' ')
+            ip_parts = parts[1].split('-')
+            ip_address = '.'.join(ip_parts)
+            
+            # Find template
+            if self.os_type == "Windows":
+                template_path = Path(__file__).parent / "resources" / "report_template.html"
+            else:
+                template_path = Path("/tmp/wifi_test_agent/resources/report_template.html")
+            
+            # Load existing report data (parse from HTML or use separate JSON)
+            # For simplicity, recreate ReportGenerator and rebuild
+            report_gen = ReportGenerator(template_path, report_file)
+            
+            # Load existing results from JSON sidecar file
+            json_path = report_file.with_suffix('.json')
+            if json_path.exists():
+                with open(json_path, 'r') as f:
+                    data = json.load(f)
+                    serialized_results = data.get('wifi_results', {})
+                    
+                    # Deserialize back to proper structure with IperfResult objects
+                    from report_generator import IperfResult
+                    
+                    for band_key, band_data in serialized_results.items():
+                        # Initialize band if not exists
+                        report_gen.wifi_results[band_key] = {
+                            'ssid': band_data.get('ssid', ''),
+                            'tests': []
+                        }
+                        
+                        # Restore all tests for this band
+                        for test in band_data.get('tests', []):
+                            result_data = test.get('result')
+                            iperf_result = None
+                            
+                            if result_data and result_data.get('transfer') and result_data.get('bandwidth'):
+                                iperf_result = IperfResult(
+                                    transfer=result_data['transfer'],
+                                    bandwidth=result_data['bandwidth']
+                                )
+                            
+                            report_gen.wifi_results[band_key]['tests'].append({
+                                'standard': test.get('standard'),
+                                'channel': test.get('channel'),
+                                'result': iperf_result
+                            })
+
+
+            
+            # Add new test result
+            report_gen.add_wifi_test(band, ssid, standard, channel, iperf_decoded)
+            
+            # Serialize wifi_results to JSON-compatible format
+            def serialize_results(results):
+                """Convert IperfResult objects to dicts for JSON serialization."""
+                serialized = {}
+                for band_key, band_data in results.items():
+                    serialized[band_key] = {
+                        'ssid': band_data.get('ssid', ''),
+                        'tests': []
+                    }
+                    for test in band_data.get('tests', []):
+                        result = test.get('result')
+                        serialized[band_key]['tests'].append({
+                            'standard': test.get('standard'),
+                            'channel': test.get('channel'),
+                            'result': {
+                                'transfer': result.transfer if result else None,
+                                'bandwidth': result.bandwidth if result else None
+                            } if result else None
+                        })
+                return serialized
+            
+            # Save results to JSON sidecar
+            with open(json_path, 'w') as f:
+                json.dump({
+                    'device_name': device_name,
+                    'ip_address': ip_address,
+                    'wifi_results': serialize_results(report_gen.wifi_results)
+                }, f, indent=2)
+            
+            # Regenerate HTML
+            report_gen.generate(device_name, ip_address)
+            
+            logger.info(f"Test result added: {band} / {standard} / Ch{channel}")
+            return True
+        
+        except Exception as e:
+            logger.error(f"Failed to add test result: {e}")
+            return False
 
     def _create_windows_profile(self, ssid, password):
         """
@@ -121,7 +370,7 @@ class DeviceManager:
         Connects to WiFi. If cleanup=True, it removes other profiles explicitly.
         CRITICAL: On Windows, removing the active profile drops the connection immediately.
         This script assumes it continues running locally even if SSH drops.
-
+        
         :param ssid: Target network SSID.
         :param password: Network password.
         :param cleanup: If True, remove all other network profiles before connecting.
