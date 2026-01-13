@@ -13,6 +13,16 @@ class IperfResult:
     Represents parsed iperf3 test results (bandwidth only).
     """
 
+    THRESHOLDS = {
+        '11b':  {'excellent': 6,   'good': 5},
+        '11g':  {'excellent': 22,  'good': 18},
+        '11n':  {'excellent': 80,  'good': 50},   # 2.4GHz
+        '11a':  {'excellent': 22,  'good': 18},
+        '11ac': {'excellent': 450, 'good': 300},
+        '11ax': {'excellent': 120, 'good': 80},
+    }# depends on band
+
+
     def __init__(self, bandwidth: float):
         """
         Initialize iperf result.
@@ -21,15 +31,18 @@ class IperfResult:
         """
         self.bandwidth = bandwidth
 
-    def get_speed_class(self) -> str:
+    def get_speed_class(self, standard: str) -> str:
         """
-        Determine CSS class based on bandwidth thresholds.
+        Determine CSS class based on standard-specific thresholds.
 
-        :return: CSS class name for speed indicator
+        :param standard: WiFi standard (e.g., '11n', '11ac')
+        :return: CSS class name
         """
-        if self.bandwidth >= 100:
+        thresholds = self.THRESHOLDS.get(standard, {'excellent': 100, 'good': 50})
+
+        if self.bandwidth >= thresholds['excellent']:
             return "speed-excellent"
-        elif self.bandwidth >= 50:
+        elif self.bandwidth >= thresholds['good']:
             return "speed-good"
         else:
             return "speed-poor"
@@ -128,27 +141,55 @@ class ReportGenerator:
             ssid = data['ssid']
             tests = data['tests']
 
+            # Group tests by standard
+            tests_by_standard = {}
+            for test in tests:
+                standard = test['standard']
+                if standard not in tests_by_standard:
+                    tests_by_standard[standard] = []
+                tests_by_standard[standard].append(test)
+
             # Band container
             html_parts.append(f'''
             <div class="band-container">
                 <h3 class="band-title">{band} <span class="ssid">({ssid})</span></h3>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Standard</th>
-                            <th>Channel</th>
-                            <th>Bandwidth</th>
-                        </tr>
-                    </thead>
-                    <tbody>
             ''')
 
-            # Test rows
-            if not tests:
-                html_parts.append('<tr><td colspan="3" class="no-data">No tests performed</td></tr>')
-            else:
-                for test in tests:
-                    standard = test['standard']
+            # Process each standard
+            for standard in sorted(tests_by_standard.keys()):
+                standard_tests = tests_by_standard[standard]
+
+                # Calculate statistics
+                bandwidths = [t['result'].bandwidth for t in standard_tests if t['result']]
+                if bandwidths:
+                    avg_bw = sum(bandwidths) / len(bandwidths)
+                    min_bw = min(bandwidths)
+                    max_bw = max(bandwidths)
+                    stats_html = f'avg: {avg_bw:.1f} | min: {min_bw:.1f} | max: {max_bw:.1f} Mbps'
+                    avg_class = self._get_speed_class_from_value(avg_bw)
+                else:
+                    stats_html = 'No valid results'
+                    avg_class = 'speed-poor'
+
+                # Standard subheader
+                html_parts.append(f'''
+                <div class="standard-group">
+                    <div class="standard-header">
+                        <span class="standard-name">{standard}</span>
+                        <span class="speed-indicator {avg_class}">{stats_html}</span>
+                    </div>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Channel</th>
+                                <th>Bandwidth</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                ''')
+
+                # Test rows
+                for test in sorted(standard_tests, key=lambda x: x['channel']):
                     channel = test['channel']
                     result = test['result']
 
@@ -156,27 +197,42 @@ class ReportGenerator:
                         speed_class = result.get_speed_class()
                         html_parts.append(f'''
                         <tr>
-                            <td>{standard}</td>
-                            <td>{channel}</td>
+                            <td>Ch {channel}</td>
                             <td><span class="speed-indicator {speed_class}">{result.bandwidth:.1f} Mbits/sec</span></td>
                         </tr>
                         ''')
                     else:
                         html_parts.append(f'''
                         <tr>
-                            <td>{standard}</td>
-                            <td>{channel}</td>
+                            <td>Ch {channel}</td>
                             <td style="color: #dc3545;">Test Failed</td>
                         </tr>
                         ''')
 
-            html_parts.append('''
-                    </tbody>
-                </table>
-            </div>
-            ''')
+                html_parts.append('''
+                        </tbody>
+                    </table>
+                </div>
+                ''')
+
+            html_parts.append('</div>')
 
         return ''.join(html_parts)
+
+    @staticmethod
+    def _get_speed_class_from_value(bandwidth: float) -> str:
+        """
+        Determine CSS class based on bandwidth value.
+
+        :param bandwidth: Bandwidth in Mbits/sec
+        :return: CSS class name
+        """
+        if bandwidth >= 100:
+            return "speed-excellent"
+        elif bandwidth >= 50:
+            return "speed-good"
+        else:
+            return "speed-poor"
 
     def generate(self, device_name: str, ip_address: str) -> None:
         """

@@ -33,8 +33,8 @@ class DeviceDiscovery:
         self.master_ip = master_station_ip
         self.ssh = None
 
-    def discover_devices(self, default_user: str = "Administrator",
-                         default_password: str = "password",
+    def discover_devices(self, default_user: str = "slave",
+                         default_password: str = "66668888",
                          ssh_timeout: int = 5) -> List[Dict]:
         """
         Perform full device discovery workflow.
@@ -148,6 +148,7 @@ class DeviceDiscovery:
         """
         ssh = None
         try:
+            logger.debug(f"Trying SSH: {user}@{ip}")
             ssh = paramiko.SSHClient()
             ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
@@ -312,7 +313,7 @@ if __name__ == "__main__":
     }
 
     MASTER_STATION_IP = '192.168.50.100'  # IP to exclude
-    DEFAULT_SSH_USER = 'Administrator'
+    DEFAULT_SSH_USER = 'slave'
     DEFAULT_SSH_PASSWORD = '66668888'
 
     # Run discovery

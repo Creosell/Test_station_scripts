@@ -125,8 +125,9 @@ class Limits:
 # --- WIFI CONFIGURATION ---
 ENCRYPTIONS = ["psk", "psk2", "psk-mixed", "sae", "sae-mixed"]
 #WIFI_STANDARDS_2G = ["11b", "11g", "11n", "11ax"]
-WIFI_STANDARDS_2G = ["11ax"]
-WIFI_STANDARDS_5G = ["11a", "11n", "11ac", "11ax"]
+#WIFI_STANDARDS_5G = ["11a", "11n", "11ac", "11ax"]
+WIFI_STANDARDS_2G = ["11n","11ax"]
+WIFI_STANDARDS_5G = ["11ac", "11ax"]
 
 NETWORKS = {
     "2G": {
@@ -135,14 +136,15 @@ NETWORKS = {
         "device": NetworkConfig.DEVICE_2G,
         "encryption": "psk2",
         # "channels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-        "channels": [13]
+        "channels": [12, 13]
     },
     "5G": {
         "ssid": NetworkConfig.SSID_5G,
         "password": NetworkConfig.WIFI_PASSWORD,
         "device": NetworkConfig.DEVICE_5G,
         "encryption": "sae-mixed",
-        "channels": [36, 40, 44, 48, 149, 153, 157, 161, 165]
+        #"channels": [36, 40, 44, 48, 149, 153, 157, 161, 165]
+        "channels": [161, 165]
     }
 }
 

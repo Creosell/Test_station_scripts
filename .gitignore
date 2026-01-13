@@ -1,2 +1,3 @@
 /WiFi/resources/wifi_profiles/
 /.idea/misc.xml
+/WiFi/discovered_devices.py

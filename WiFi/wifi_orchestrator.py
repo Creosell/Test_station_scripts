@@ -650,9 +650,9 @@ if __name__ == "__main__":
                         help='Maximum number of parallel workers (default: number of devices)')
     parser.add_argument('--auto-discover', action='store_true',
                         help='Automatically discover DUT devices in network')
-    parser.add_argument('--discovery-user', default='Administrator',
-                        help='Default SSH username for device discovery (default: Administrator)')
-    parser.add_argument('--discovery-password', default='password',
+    parser.add_argument('--discovery-user', default='slave',
+                        help='Default SSH username for device discovery (default: slave)')
+    parser.add_argument('--discovery-password', default='66668888',
                         help='Default SSH password for device discovery')
     parser.add_argument('--master-ip', default=None,
                         help='Master station IP to exclude from discovery (default: auto-detect)')
