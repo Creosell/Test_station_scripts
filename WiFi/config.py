@@ -71,6 +71,16 @@ class DUTConfig:
     ]
 
 
+class RouterConfig:
+    """
+    Router configuration for device discovery and management.
+    Used by --auto-discover feature to query DHCP clients.
+    """
+    IP = NetworkConfig.ROUTER_IP
+    USER = NetworkConfig.SSH_USER
+    PASSWORD = NetworkConfig.SSH_PASSWORD
+
+
 class ReportPaths:
     """
     Paths for HTML report generation and collection.

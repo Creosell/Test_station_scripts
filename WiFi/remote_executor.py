@@ -15,11 +15,11 @@ class RemoteDeviceExecutor:
     Manages remote execution of test agents on Device Under Test (DUT).
     Handles SSH connection, script deployment, and command execution.
     """
-    
+
     def __init__(self, device_config):
         """
         Initialize remote executor with device configuration.
-        
+
         :param device_config: Dictionary containing device connection parameters
         """
         self.config = device_config
@@ -52,7 +52,7 @@ class RemoteDeviceExecutor:
     def _exec_command_verbose(self, cmd, description):
         """
         Execute SSH command and log output verbosely.
-        
+
         :param cmd: Command string to execute
         :param description: Human-readable description for logging
         :return: Tuple of (exit_status, stdout, stderr)
@@ -180,7 +180,7 @@ class RemoteDeviceExecutor:
     def _run_agent_command(self, cmd_args, timeout=None):
         """
         Execute agent.py command on remote device (private method).
-        
+
         :param cmd_args: Arguments to pass to agent.py
         :param timeout: Optional timeout in seconds for command execution
         :return: Tuple of (success: bool, output: str)
@@ -209,7 +209,7 @@ class RemoteDeviceExecutor:
             else:
                 logger.error(f"Agent Logic Failure: {out_str}")
                 return False, out_str
-        
+
         except socket.timeout:
             logger.warning(f"Agent command timed out after {timeout}s (may be normal for network switch)")
             return False, None
@@ -217,13 +217,13 @@ class RemoteDeviceExecutor:
     def run_agent_command(self, cmd_args, timeout=None):
         """
         Execute agent.py command on remote device (public method).
-        
+
         :param cmd_args: Arguments to pass to agent.py
         :param timeout: Optional timeout in seconds for command execution
         :return: Tuple of (stdout: str, stderr: str)
         """
         success, output = self._run_agent_command(cmd_args, timeout)
-        
+
         if success and output:
             return output, ""
         else:
@@ -239,10 +239,10 @@ class RemoteDeviceExecutor:
     def connect_wifi(self, ssid, password):
         """
         Connect remote device to specified WiFi network with cleanup.
-        
+
         IMPORTANT: This command may cause SSH disconnection when switching networks.
         The method handles reconnection automatically via polling.
-        
+
         :param ssid: Target network SSID
         :param password: Network password
         :return: True if connection successful, False otherwise
@@ -274,7 +274,7 @@ class RemoteDeviceExecutor:
         """
         Poll the device via SSH until it becomes available again.
         Used after WiFi network switches that break SSH connection.
-        
+
         :return: True if device reconnected, False if timeout
         """
         logger.info("Polling device availability...")
@@ -303,7 +303,7 @@ class RemoteDeviceExecutor:
     def run_iperf(self):
         """
         Execute iperf3 test on remote device and return raw output.
-        
+
         :return: Raw iperf output string or None if test failed
         """
         logger.info("Remote: Running iperf...")
@@ -322,30 +322,30 @@ class RemoteDeviceExecutor:
     def init_remote_report(self, device_name, ip_address):
         """
         Initialize HTML report on DUT for incremental updates.
-        
+
         :param device_name: System product name
         :param ip_address: Device IP address
         :return: Remote report path or None if failed
         """
         report_dir = Paths.REMOTE_WINDOWS_WORK_DIR + "\\reports" if self.os_type == "Windows" else Paths.REMOTE_LINUX_WORK_DIR + "/reports"
-        
+
         cmd = f'init_report --device_name "{device_name}" --ip_address {ip_address} --report_dir "{report_dir}"'
         success, output = self._run_agent_command(cmd)
-        
+
         if success and "REPORT_PATH:" in output:
             for line in output.split('\n'):
                 if line.startswith("REPORT_PATH:"):
                     remote_path = line.split(":", 1)[1].strip()
                     logger.info(f"Remote report initialized: {remote_path}")
                     return remote_path
-        
+
         logger.error("Failed to initialize remote report")
         return None
 
     def add_remote_test_result(self, report_path, band, ssid, standard, channel, iperf_output):
         """
         Add test result to remote HTML report (incremental update).
-        
+
         :param report_path: Remote path to report file
         :param band: Frequency band
         :param ssid: Network SSID
@@ -357,10 +357,10 @@ class RemoteDeviceExecutor:
         # Escape iperf output for command line (base64 encode)
         import base64
         iperf_b64 = base64.b64encode(iperf_output.encode()).decode()
-        
+
         cmd = f'add_result --report_path "{report_path}" --band "{band}" --ssid "{ssid}" --standard "{standard}" --channel {channel} --iperf_output "{iperf_b64}"'
         success, output = self._run_agent_command(cmd, timeout=10)
-        
+
         if success:
             logger.info(f"Test result added to remote report: {band}/{standard}/Ch{channel}")
             return True
@@ -371,7 +371,7 @@ class RemoteDeviceExecutor:
     def download_report(self, remote_path, local_dir):
         """
         Download HTML report from DUT to local machine.
-        
+
         :param remote_path: Remote path to report file
         :param local_dir: Local directory to save report
         :return: Local file path or None if failed
@@ -379,12 +379,12 @@ class RemoteDeviceExecutor:
         try:
             from pathlib import Path
             local_path = Path(local_dir) / Path(remote_path).name
-            
+
             with SCPClient(self.ssh.get_transport()) as scp:
                 scp.get(remote_path.replace("\\", "/"), str(local_path))
                 logger.info(f"Report downloaded: {local_path.name}")
                 return str(local_path)
-        
+
         except Exception as e:
             logger.error(f"Failed to download report: {e}")
             return None

@@ -10,20 +10,16 @@ logger = logging.getLogger("ReportGen")
 
 class IperfResult:
     """
-    Represents parsed iperf3 test results.
+    Represents parsed iperf3 test results (bandwidth only).
     """
 
-    def __init__(self, transfer: str, bandwidth: float, direction: str = "sender"):
+    def __init__(self, bandwidth: float):
         """
         Initialize iperf result.
 
-        :param transfer: Transfer amount (e.g., "64.2 MBytes")
         :param bandwidth: Bandwidth in Mbits/sec
-        :param direction: Either "sender" or "receiver"
         """
-        self.transfer = transfer
         self.bandwidth = bandwidth
-        self.direction = direction
 
     def get_speed_class(self) -> str:
         """
@@ -65,26 +61,24 @@ class ReportGenerator:
     @staticmethod
     def parse_iperf_output(output: str) -> Optional[IperfResult]:
         """
-        Parse iperf3 output to extract bandwidth and transfer data.
+        Parse iperf3 output to extract bandwidth (sender).
 
         Expected format:
         [ ID] Interval           Transfer     Bandwidth
         [  4]   0.00-10.00  sec  64.2 MBytes  53.9 Mbits/sec                  sender
-        [  4]   0.00-10.00  sec  63.5 MBytes  53.3 Mbits/sec                  receiver
 
         :param output: Raw iperf3 stdout
         :return: IperfResult object or None if parsing failed
         """
         try:
-            # Match sender line (more reliable than receiver)
-            pattern = r'\[\s*\d+\]\s+[\d\.\-]+\s+sec\s+([\d\.]+\s+[MGK]Bytes)\s+([\d\.]+)\s+[MGK]bits/sec\s+sender'
+            # Match sender line for bandwidth
+            pattern = r'\[\s*\d+\]\s+[\d\.\-]+\s+sec\s+[\d\.]+\s+[MGK]Bytes\s+([\d\.]+)\s+[MGK]bits/sec\s+sender'
             match = re.search(pattern, output)
 
             if match:
-                transfer = match.group(1)
-                bandwidth = float(match.group(2))
-                logger.info(f"Parsed iperf: {transfer}, {bandwidth} Mbits/sec")
-                return IperfResult(transfer, bandwidth)
+                bandwidth = float(match.group(1))
+                logger.info(f"Parsed iperf: {bandwidth} Mbits/sec")
+                return IperfResult(bandwidth)
             else:
                 logger.warning("Could not parse iperf output")
                 return None
@@ -143,7 +137,6 @@ class ReportGenerator:
                         <tr>
                             <th>Standard</th>
                             <th>Channel</th>
-                            <th>Transfer</th>
                             <th>Bandwidth</th>
                         </tr>
                     </thead>
@@ -152,7 +145,7 @@ class ReportGenerator:
 
             # Test rows
             if not tests:
-                html_parts.append('<tr><td colspan="4" class="no-data">No tests performed</td></tr>')
+                html_parts.append('<tr><td colspan="3" class="no-data">No tests performed</td></tr>')
             else:
                 for test in tests:
                     standard = test['standard']
@@ -165,7 +158,6 @@ class ReportGenerator:
                         <tr>
                             <td>{standard}</td>
                             <td>{channel}</td>
-                            <td>{result.transfer}</td>
                             <td><span class="speed-indicator {speed_class}">{result.bandwidth:.1f} Mbits/sec</span></td>
                         </tr>
                         ''')
@@ -174,7 +166,7 @@ class ReportGenerator:
                         <tr>
                             <td>{standard}</td>
                             <td>{channel}</td>
-                            <td colspan="2" style="color: #dc3545;">Test Failed</td>
+                            <td style="color: #dc3545;">Test Failed</td>
                         </tr>
                         ''')
 
