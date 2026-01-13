@@ -20,11 +20,50 @@ class DeviceManager:
         self.os_type = platform.system()
         logger.info(f"Detected OS: {self.os_type}")
 
-        # Ensure profiles directory exists
+        # Ensure profiles directory exists for Windows
         if self.os_type == "Windows":
-            # Paths.PROFILES_DIR is now a Path object, os.makedirs accepts it in Py3.6+
-            # but str() ensures compatibility
             os.makedirs(str(Paths.PROFILES_DIR), exist_ok=True)
+
+    def get_system_product_name(self):
+        """
+        Retrieves system product name (manufacturer model).
+
+        :return: System product name string or "Unknown" if retrieval fails
+        """
+        try:
+            if self.os_type == "Windows":
+                # Use PowerShell to get system product name
+                cmd = ['powershell', '-Command',
+                       'Get-CimInstance -ClassName Win32_ComputerSystemProduct | Select-Object -ExpandProperty Name']
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
+                if res.returncode == 0 and res.stdout.strip():
+                    return res.stdout.strip()
+
+            elif self.os_type == "Linux":
+                # Try dmidecode first (requires root/sudo)
+                try:
+                    res = subprocess.run(['sudo', 'dmidecode', '-s', 'system-product-name'],
+                                         capture_output=True, text=True, timeout=5)
+                    if res.returncode == 0 and res.stdout.strip():
+                        return res.stdout.strip()
+                except:
+                    pass
+
+                # Fallback: read from /sys filesystem
+                try:
+                    with open('/sys/devices/virtual/dmi/id/product_name', 'r') as f:
+                        product = f.read().strip()
+                        if product:
+                            return product
+                except:
+                    pass
+
+            # Fallback: use hostname
+            return platform.node()
+
+        except Exception as e:
+            logger.warning(f"Could not retrieve system product name: {e}")
+            return "Unknown"
 
     def _create_windows_profile(self, ssid, password):
         """
@@ -56,13 +95,12 @@ class DeviceManager:
   </MSM>
 </WLANProfile>"""
 
-        # Use pathlib operator /
         file_path = Paths.PROFILES_DIR / f"{ssid}.xml"
         try:
             with open(file_path, "w", encoding="utf-8") as f:
                 f.write(xml_content)
             logger.info(f"Generated Windows profile: {file_path}")
-            return str(file_path)  # Return string for subprocess usage
+            return str(file_path)
         except Exception as e:
             logger.error(f"Failed to create profile {file_path}: {e}")
             raise
@@ -83,45 +121,49 @@ class DeviceManager:
         Connects to WiFi. If cleanup=True, it removes other profiles explicitly.
         CRITICAL: On Windows, removing the active profile drops the connection immediately.
         This script assumes it continues running locally even if SSH drops.
+
+        :param ssid: Target network SSID.
+        :param password: Network password.
+        :param cleanup: If True, remove all other network profiles before connecting.
+        :return: True if connection successful, False otherwise.
         """
         last_exception = None
 
-        # 1. Предварительное создание профиля (чтобы было к чему коннектиться после удаления)
+        # Step 1: Pre-create target profile (ensures we have something to connect to after cleanup)
         if self.os_type == "Windows":
-            # Всегда обновляем/создаем профиль целевой сети ПЕРЕД удалением остальных
+            # Always create/update target network profile BEFORE removing others
             self._create_windows_profile(ssid, password)
             profile_path = Paths.PROFILES_DIR / f"{ssid}.xml"
             subprocess.run(['netsh', 'wlan', 'add', 'profile', f'filename={str(profile_path)}'], capture_output=True)
 
-        # 2. Очистка старых сетей (если запрошено)
+        # Step 2: Cleanup old network profiles (if requested)
         if cleanup:
             logger.info("Cleaning up old profiles...")
-            # Важно: Не удаляем профиль, который только что создали (ssid)
+            # Important: Do not delete the profile we just created (ssid)
             if self.os_type == "Windows":
-                # Получаем список всех профилей
+                # Get list of all profiles
                 res = subprocess.run(['netsh', 'wlan', 'show', 'profiles'], capture_output=True, text=True)
                 for line in res.stdout.split('\n'):
                     if "All User Profile" in line:
                         p_name = line.split(":", 1)[1].strip()
-                        if p_name != ssid:  # Не удаляем целевую сеть
+                        if p_name != ssid:  # Don't delete target network
                             subprocess.run(["netsh", "wlan", "delete", "profile", f"name={p_name}"],
                                            capture_output=True)
             elif self.os_type == "Linux":
-                # Для Linux (NetworkManager) логика может быть сложнее, но принцип тот же
-                # Здесь упрощенно: удаляем все, кроме текущего (если реализуете)
+                # For Linux (NetworkManager) - simplified implementation
                 pass
 
-                # 3. Цикл подключения (как и было раньше, но без создания профиля внутри цикла, т.к. сделали выше)
+        # Step 3: Connection retry loop (profile already created above, no need to recreate inside loop)
         for attempt in range(1, Limits.WIFI_CONNECT_RETRIES + 1):
             try:
-                # --- ИЗМЕНЕНИЕ: Безопасное логирование ---
+                # Safe logging (handle potential OSError if SSH pipe broken)
                 try:
                     logger.info(f"Connecting to {ssid} (Attempt {attempt})...")
                 except OSError:
-                    pass  #
+                    pass
 
                 if self.os_type == "Linux":
-                    # ... (код linux без изменений)
+                    # Linux connection sequence
                     subprocess.run(['nmcli', 'radio', 'wifi', 'off'], capture_output=True)
                     time.sleep(Timings.WIFI_TOGGLE_DELAY)
                     subprocess.run(['nmcli', 'radio', 'wifi', 'on'], capture_output=True)
@@ -130,11 +172,11 @@ class DeviceManager:
                                          capture_output=True, text=True)
 
                 elif self.os_type == "Windows":
-                    # Профиль уже создан на шаге 1
+                    # Profile already created in Step 1
                     time.sleep(Timings.PROFILE_ADD_DELAY)
                     res = subprocess.run(['netsh', 'wlan', 'connect', f'name={ssid}'], capture_output=True, text=True)
 
-                # Ждем подключения
+                # Wait for connection to establish
                 time.sleep(Timings.WIFI_CONNECTION_TIMEOUT)
 
                 if self._verify_connection(ssid):
@@ -191,7 +233,7 @@ class DeviceManager:
                 logger.error(f"Iperf executable not found at: {iperf_path}")
                 logger.error(f"Please place 'iperf.exe' (and 'cygwin1.dll') in the '{Paths.RESOURCES_DIR}' folder.")
                 return None
-            cmd_base = [str(iperf_path)]  # Explicit conversion
+            cmd_base = [str(iperf_path)]
         else:
             cmd_base = ['iperf3']
 

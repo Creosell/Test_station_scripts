@@ -16,6 +16,7 @@ def main():
     # Command: connect
     cmd_connect = subparsers.add_parser("connect")
     cmd_connect.add_argument("--ssid", required=True)
+    cmd_connect.add_argument("--password", required=True)
     cmd_connect.add_argument("--cleanup", action="store_true", help="Forget other networks before connecting")
 
     # Command: iperf
@@ -23,6 +24,9 @@ def main():
 
     # Command: forget
     cmd_forget = subparsers.add_parser("forget")
+
+    # Command: sysinfo
+    cmd_sysinfo = subparsers.add_parser("sysinfo", help="Get system product name")
 
     args = parser.parse_args()
 
@@ -49,6 +53,11 @@ def main():
 
         elif args.command == "forget":
             dm.forget_all_networks()
+            print("RESULT:SUCCESS")
+
+        elif args.command == "sysinfo":
+            product_name = dm.get_system_product_name()
+            print(f"SYSTEM_PRODUCT:{product_name}")
             print("RESULT:SUCCESS")
 
     except Exception as e:

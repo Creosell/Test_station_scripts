@@ -1,7 +1,7 @@
 import logging
 import sys
 import os
-from pathlib import Path  # Introduced pathlib
+from pathlib import Path
 
 
 # --- PATH CONFIGURATION ---
@@ -41,7 +41,9 @@ class Paths:
 
 # --- NETWORK CONFIGURATION ---
 class NetworkConfig:
-    # ... (Остальной код NetworkConfig, DUTConfig, Timings, Limits, ENCRYPTIONS, NETWORKS остается без изменений) ...
+    """
+    Network and device configuration constants.
+    """
     SSID_2G = "QA_Test_2G"
     SSID_5G = "QA_Test_5G"
     WIFI_PASSWORD = "66668888"
@@ -54,6 +56,9 @@ class NetworkConfig:
 
 
 class DUTConfig:
+    """
+    Device Under Test (DUT) configuration.
+    """
     DEVICES = [
         {
             "name": "Laptop_Dell_Win",
@@ -66,7 +71,25 @@ class DUTConfig:
     ]
 
 
+class ReportPaths:
+    """
+    Paths for HTML report generation and collection.
+    """
+    # Local reports directory (orchestrator machine)
+    LOCAL_REPORTS_DIR = Path(__file__).parent / "reports"
+
+    # Report template location
+    REPORT_TEMPLATE = Path(__file__).parent / "resources" / "report_template.html"
+
+    # Remote report directory (on DUT)
+    REMOTE_REPORT_DIR = "C:\\Temp\\wifi_test_agent\\reports"  # Windows
+    REMOTE_REPORT_DIR_LINUX = "/tmp/wifi_test_agent/reports"  # Linux
+
+
 class Timings:
+    """
+    Timeout and delay constants (in seconds).
+    """
     SSH_TIMEOUT = 10
     WIFI_CONNECTION_TIMEOUT = 30
     CMD_VERIFY_TIMEOUT = 10
@@ -80,12 +103,16 @@ class Timings:
 
 
 class Limits:
+    """
+    Retry and attempt limits for operations.
+    """
     SSH_RETRIES = 5
     WIFI_CONNECT_RETRIES = 3
     MAX_CHECK_ATTEMPTS = 15
     CONNECTION_RETRY_DELAY = 5
 
 
+# --- WIFI CONFIGURATION ---
 ENCRYPTIONS = ["psk", "psk2", "psk-mixed", "sae", "sae-mixed"]
 WIFI_STANDARDS_2G = ["11b", "11g", "11n", "11ax"]
 WIFI_STANDARDS_5G = ["11a", "11n", "11ac", "11ax"]
@@ -108,10 +135,18 @@ NETWORKS = {
 }
 
 
-# --- LOGGING SYSTEM (Unchanged) ---
-# ... (Оставьте классы ConsoleOverwriterHandler, MinimalFormatter и setup_logging без изменений) ...
+# --- LOGGING SYSTEM ---
 class ConsoleOverwriterHandler(logging.StreamHandler):
+    """
+    Custom logging handler that overwrites the current console line.
+    """
+
     def emit(self, record):
+        """
+        Emit a record, clearing the line before writing.
+
+        :param record: LogRecord instance
+        """
         try:
             msg = self.format(record)
             stream = self.stream
@@ -123,6 +158,9 @@ class ConsoleOverwriterHandler(logging.StreamHandler):
 
 
 class MinimalFormatter(logging.Formatter):
+    """
+    Minimalist colored formatter with symbols for log levels.
+    """
     GREY = "\x1b[38;5;240m"
     GREEN = "\x1b[32m"
     YELLOW = "\x1b[33m"
@@ -130,6 +168,12 @@ class MinimalFormatter(logging.Formatter):
     RESET = "\x1b[0m"
 
     def format(self, record):
+        """
+        Format a log record with color and level symbol.
+
+        :param record: LogRecord instance
+        :return: Formatted string
+        """
         if record.levelno == logging.DEBUG:
             prefix = f"{self.GREY}d{self.RESET}"
             msg_color = self.GREY
@@ -152,6 +196,12 @@ class MinimalFormatter(logging.Formatter):
 
 
 def setup_logging(verbose: bool = False):
+    """
+    Configure root logger with custom console handler.
+
+    :param verbose: If True, set level to DEBUG, otherwise INFO
+    :return: Configured root logger
+    """
     root_logger = logging.getLogger()
     if root_logger.hasHandlers():
         root_logger.handlers.clear()

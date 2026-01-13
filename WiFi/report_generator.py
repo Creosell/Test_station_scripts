@@ -1,0 +1,228 @@
+import re
+import os
+from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Optional, Tuple
+import logging
+
+logger = logging.getLogger("ReportGen")
+
+
+class IperfResult:
+    """
+    Represents parsed iperf3 test results.
+    """
+
+    def __init__(self, transfer: str, bandwidth: float, direction: str = "sender"):
+        """
+        Initialize iperf result.
+
+        :param transfer: Transfer amount (e.g., "64.2 MBytes")
+        :param bandwidth: Bandwidth in Mbits/sec
+        :param direction: Either "sender" or "receiver"
+        """
+        self.transfer = transfer
+        self.bandwidth = bandwidth
+        self.direction = direction
+
+    def get_speed_class(self) -> str:
+        """
+        Determine CSS class based on bandwidth thresholds.
+
+        :return: CSS class name for speed indicator
+        """
+        if self.bandwidth >= 100:
+            return "speed-excellent"
+        elif self.bandwidth >= 50:
+            return "speed-good"
+        else:
+            return "speed-poor"
+
+
+class ReportGenerator:
+    """
+    Generates HTML test reports from template and test results.
+    """
+
+    def __init__(self, template_path: Path, output_path: Path):
+        """
+        Initialize report generator.
+
+        :param template_path: Path to HTML template file
+        :param output_path: Path where report will be saved
+        """
+        self.template_path = template_path
+        self.output_path = output_path
+        self.wifi_results: Dict[str, Dict] = {}  # {band: {ssid, tests: []}}
+
+        # Load template
+        if not template_path.exists():
+            raise FileNotFoundError(f"Template not found: {template_path}")
+
+        with open(template_path, 'r', encoding='utf-8') as f:
+            self.template = f.read()
+
+    @staticmethod
+    def parse_iperf_output(output: str) -> Optional[IperfResult]:
+        """
+        Parse iperf3 output to extract bandwidth and transfer data.
+
+        Expected format:
+        [ ID] Interval           Transfer     Bandwidth
+        [  4]   0.00-10.00  sec  64.2 MBytes  53.9 Mbits/sec                  sender
+        [  4]   0.00-10.00  sec  63.5 MBytes  53.3 Mbits/sec                  receiver
+
+        :param output: Raw iperf3 stdout
+        :return: IperfResult object or None if parsing failed
+        """
+        try:
+            # Match sender line (more reliable than receiver)
+            pattern = r'\[\s*\d+\]\s+[\d\.\-]+\s+sec\s+([\d\.]+\s+[MGK]Bytes)\s+([\d\.]+)\s+[MGK]bits/sec\s+sender'
+            match = re.search(pattern, output)
+
+            if match:
+                transfer = match.group(1)
+                bandwidth = float(match.group(2))
+                logger.info(f"Parsed iperf: {transfer}, {bandwidth} Mbits/sec")
+                return IperfResult(transfer, bandwidth)
+            else:
+                logger.warning("Could not parse iperf output")
+                return None
+        except Exception as e:
+            logger.error(f"Error parsing iperf output: {e}")
+            return None
+
+    def add_wifi_test(self, band: str, ssid: str, standard: str, channel: int,
+                      iperf_output: str) -> None:
+        """
+        Add WiFi test result to report.
+
+        :param band: Frequency band (e.g., "2.4 GHz", "5 GHz")
+        :param ssid: Network SSID
+        :param standard: WiFi standard (e.g., "802.11n", "802.11ac")
+        :param channel: WiFi channel number
+        :param iperf_output: Raw iperf3 output
+        """
+        if band not in self.wifi_results:
+            self.wifi_results[band] = {
+                'ssid': ssid,
+                'tests': []
+            }
+
+        result = self.parse_iperf_output(iperf_output)
+
+        self.wifi_results[band]['tests'].append({
+            'standard': standard,
+            'channel': channel,
+            'result': result
+        })
+
+        logger.info(f"Added test: {band} / {standard} / Ch{channel}")
+
+    def _generate_wifi_content(self) -> str:
+        """
+        Generate WiFi section HTML from collected test results.
+
+        :return: HTML string for WiFi section
+        """
+        if not self.wifi_results:
+            return '<div class="no-data">No WiFi test data available</div>'
+
+        html_parts = []
+
+        for band, data in sorted(self.wifi_results.items()):
+            ssid = data['ssid']
+            tests = data['tests']
+
+            # Band container
+            html_parts.append(f'''
+            <div class="band-container">
+                <h3 class="band-title">{band} <span class="ssid">({ssid})</span></h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Standard</th>
+                            <th>Channel</th>
+                            <th>Transfer</th>
+                            <th>Bandwidth</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            ''')
+
+            # Test rows
+            if not tests:
+                html_parts.append('<tr><td colspan="4" class="no-data">No tests performed</td></tr>')
+            else:
+                for test in tests:
+                    standard = test['standard']
+                    channel = test['channel']
+                    result = test['result']
+
+                    if result:
+                        speed_class = result.get_speed_class()
+                        html_parts.append(f'''
+                        <tr>
+                            <td>{standard}</td>
+                            <td>{channel}</td>
+                            <td>{result.transfer}</td>
+                            <td><span class="speed-indicator {speed_class}">{result.bandwidth:.1f} Mbits/sec</span></td>
+                        </tr>
+                        ''')
+                    else:
+                        html_parts.append(f'''
+                        <tr>
+                            <td>{standard}</td>
+                            <td>{channel}</td>
+                            <td colspan="2" style="color: #dc3545;">Test Failed</td>
+                        </tr>
+                        ''')
+
+            html_parts.append('''
+                    </tbody>
+                </table>
+            </div>
+            ''')
+
+        return ''.join(html_parts)
+
+    def generate(self, device_name: str, ip_address: str) -> None:
+        """
+        Generate final HTML report and save to file.
+
+        :param device_name: Device system product name
+        :param ip_address: Device IP address
+        """
+        # Generate WiFi content
+        wifi_content = self._generate_wifi_content()
+
+        # Replace template placeholders
+        html = self.template.replace('{DEVICE_NAME}', device_name)
+        html = html.replace('{IP_ADDRESS}', ip_address)
+        html = html.replace('{TIMESTAMP}', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        html = html.replace('{WIFI_CONTENT}', wifi_content)
+
+        # Ensure output directory exists
+        self.output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Write report
+        with open(self.output_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+
+        logger.info(f"Report generated: {self.output_path}")
+
+    @staticmethod
+    def generate_report_filename(device_name: str, ip_address: str) -> str:
+        """
+        Generate unique report filename.
+
+        :param device_name: Device system product name
+        :param ip_address: Device IP address
+        :return: Filename string (e.g., "ThinkPad-X1_192-168-50-178_20250113-141530.html")
+        """
+        # Sanitize device name (remove spaces, special chars)
+        safe_name = re.sub(r'[^\w\-]', '_', device_name)
+        safe_ip = ip_address.replace('.', '-')
+        timestamp = datetime.now().strftime('%Y%m%d-%H%M%S')
+
+        return f"{safe_name}_{safe_ip}_{timestamp}.html"
