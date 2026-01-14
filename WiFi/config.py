@@ -15,9 +15,6 @@ class Paths:
     RESOURCES_DIR = BASE_DIR / "resources"
     PROFILES_DIR = RESOURCES_DIR / "wifi_profiles"
 
-    # Executable paths
-    IPERF_EXE_WIN = RESOURCES_DIR / "iperf.exe"
-
     # Remote paths for deployment (Strings are sufficient here as they are destination literals)
     REMOTE_LINUX_WORK_DIR = "/tmp/wifi_test_agent"
     REMOTE_WINDOWS_WORK_DIR = "C:\\Temp\\wifi_test_agent"
@@ -126,8 +123,8 @@ class Limits:
 ENCRYPTIONS = ["psk", "psk2", "psk-mixed", "sae", "sae-mixed"]
 #WIFI_STANDARDS_2G = ["11b", "11g", "11n", "11ax"]
 #WIFI_STANDARDS_5G = ["11a", "11n", "11ac", "11ax"]
-WIFI_STANDARDS_2G = ["11n","11ax"]
-WIFI_STANDARDS_5G = ["11ac", "11ax"]
+WIFI_STANDARDS_2G = ["11b/g/n","11b/g/n/ax"]
+WIFI_STANDARDS_5G = ["11a/n/ac", "11a/n/ac/ax"]
 
 NETWORKS = {
     "2G": {

@@ -284,13 +284,12 @@ class WiFiTestOrchestrator:
                 for standard in standards:
                     logger.info(f"Testing Standard: {standard}")
 
-                    # Switch router to this standard
-                    if not self._safe_switch_router(
-                            lambda: self.router.change_standard(net_config["device"], standard),
-                            net_config["device"], "hwmode", standard
-                    ):
-                        logger.error(f"Failed to set standard {standard}, skipping")
+                    try:
+                        self.router.change_standard(net_config["device"], standard)
+                    except Exception as e:
+                        logger.error(f"Failed to set standard {standard}: {e}")
                         continue
+
 
                     for channel in net_config["channels"]:
                         logger.info(f"\n>>> Testing Channel {channel} ({standard}) on ALL devices <<<")
@@ -550,9 +549,10 @@ class WiFiTestOrchestrator:
         for standard in standards:
             logger.info(f"Testing Standard: {standard}")
 
-            # Switch Router Standard
-            if not self._safe_switch_router(lambda: self.router.change_standard(net_config["device"], standard),
-                                            net_config["device"], "hwmode", standard):
+            try:
+                self.router.change_standard(net_config["device"], standard)
+            except Exception as e:
+                logger.error(f"Failed to set standard {standard}: {e}")
                 continue
 
             # Re-verify connection

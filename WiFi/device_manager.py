@@ -468,21 +468,11 @@ class DeviceManager:
 
     def run_iperf(self):
         """
-        Runs iperf3 test using the executable from resources folder on Windows or system iperf3 on Linux.
+        Runs iperf3 test using iperf3 from system PATH (both Windows and Linux).
 
         :return: The stdout output of the iperf command or None if failed.
         """
-        if self.os_type == "Windows":
-            iperf_path = Paths.IPERF_EXE_WIN
-            if not iperf_path.exists():
-                logger.error(f"Iperf executable not found at: {iperf_path}")
-                logger.error(f"Please place 'iperf.exe' (and 'cygwin1.dll') in the '{Paths.RESOURCES_DIR}' folder.")
-                return None
-            cmd_base = [str(iperf_path)]
-        else:
-            cmd_base = ['iperf3']
-
-        cmd = cmd_base + ['-c', NetworkConfig.IPERF_SERVER_IP, '-t', Timings.IPERF_DURATION]
+        cmd = ['iperf3', '-c', NetworkConfig.IPERF_SERVER_IP, '-t', Timings.IPERF_DURATION]
 
         logger.info(f"Running iperf3 -> {NetworkConfig.IPERF_SERVER_IP}")
         try:
