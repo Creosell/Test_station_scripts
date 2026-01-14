@@ -57,7 +57,6 @@ WIFI_MODES_5G = {
     }
 }
 
-
 class RouterManager:
     """
     Handles SSH communication with the router to change settings.
@@ -65,9 +64,15 @@ class RouterManager:
 
     def __init__(self):
         self.ssh_client = None
+        self._retry_count = 0
+        self._max_retries = 10
 
-    @retry(stop=stop_after_attempt(Limits.SSH_RETRIES), wait=wait_fixed(Limits.CONNECTION_RETRY_DELAY))
     def connect_ssh(self):
+        """
+        Establish SSH connection to router.
+
+        :raises Exception: If connection fails
+        """
         if self.ssh_client:
             self.ssh_client.close()
 
@@ -83,15 +88,69 @@ class RouterManager:
             allow_agent=False
         )
 
+        # Enable keepalive to prevent timeout
+        transport = self.ssh_client.get_transport()
+        transport.set_keepalive(10)
+
         stdin, stdout, stderr = self.ssh_client.exec_command('echo "SSH connection test"')
-        if "SSH connection test" in stdout.read().decode():
-            return True
-        else:
+        if "SSH connection test" not in stdout.read().decode():
             raise Exception("SSH test command failed")
+
+    def _ensure_connection(self):
+        """
+        Ensure SSH connection is active, reconnect if needed.
+
+        :raises Exception: If max retries exceeded
+        """
+        if self.ssh_client and self._is_connection_alive():
+            logger.debug("♻ Reusing existing SSH connection to router")
+            return
+
+        if self.ssh_client:
+            logger.info("SSH connection lost, reconnecting...")
+
+        while self._retry_count < self._max_retries:
+            try:
+                self.connect_ssh()
+                self._retry_count = 0
+                logger.info("SSH connection established to router")
+                return
+            except Exception as e:
+                self._retry_count += 1
+                logger.warning(f"SSH reconnect attempt {self._retry_count}/{self._max_retries}: {e}")
+                if self._retry_count >= self._max_retries:
+                    raise Exception(f"Failed to establish SSH connection after {self._max_retries} attempts")
+                time.sleep(Limits.CONNECTION_RETRY_DELAY)
+
+    def _is_connection_alive(self) -> bool:
+        """
+        Check if SSH connection is active.
+
+        :return: True if connection is alive
+        """
+        if not self.ssh_client:
+            logger.debug("No ssh_client instance")
+            return False
+
+        try:
+            transport = self.ssh_client.get_transport()
+            if transport is None:
+                logger.debug("Transport is None")
+                return False
+            if not transport.is_active():
+                logger.debug("Transport not active")
+                return False
+            transport.send_ignore()
+            logger.debug("Connection alive - send_ignore() successful")
+            return True
+        except Exception as e:
+            logger.debug(f"Connection check failed: {e}")
+            return False
 
     def close(self):
         if self.ssh_client:
             self.ssh_client.close()
+            self.ssh_client = None
 
     def _exec_uci(self, commands, description):
         logger.info(description)
@@ -109,10 +168,7 @@ class RouterManager:
             device: Device identifier (e.g., 'mt798111', 'mt798112')
             channel: Channel number or 'auto'
         """
-
-        if not self.ssh_client:
-            self.connect_ssh()
-
+        self._ensure_connection()
         self._exec_uci(
             [f"uci set wireless.{device}.channel={channel}", "uci commit wireless"],
             f"Setting channel for {device} to {channel}"
@@ -129,6 +185,7 @@ class RouterManager:
         Returns:
             str: Current setting value
         """
+        self._ensure_connection()
         stdin, stdout, stderr = self.ssh_client.exec_command(f"uci get wireless.{device}.{setting_name}")
         output = stdout.read().decode().strip()
         logger.info(f"Current {setting_name} for {device}: {output}")
@@ -169,10 +226,7 @@ class RouterManager:
             ValueError: If mode is not supported for the device band
             Exception: If mode verification fails
         """
-
-        if not self.ssh_client:
-            self.connect_ssh()
-
+        self._ensure_connection()
 
         band = "2g" if device == NetworkConfig.DEVICE_2G else "5g"
         mode_map = WIFI_MODES_2G if band == "2g" else WIFI_MODES_5G
@@ -200,11 +254,11 @@ class RouterManager:
             raise Exception(f"Failed to apply mode {mode}: htmode verification failed")
 
     def set_channel_auto(self):
-        """
+        """1
         Resets both 2.4GHz and 5GHz channels to automatic selection.
         """
         try:
-            self.connect_ssh()
+            self._ensure_connection()
             logger.info("Resetting channels to auto")
             self.ssh_client.exec_command(f"uci set wireless.{NetworkConfig.DEVICE_2G}.channel=auto")
             self.ssh_client.exec_command(f"uci set wireless.{NetworkConfig.DEVICE_5G}.channel=auto")
@@ -218,7 +272,7 @@ class RouterManager:
         Resets WiFi modes to default (maximum compatibility: 11b/g/n/ax for 2.4GHz, 11a/n/ac/ax for 5GHz).
         """
         try:
-            self.connect_ssh()
+            self._ensure_connection()
             logger.info("Resetting modes to default")
 
             self.change_standard(NetworkConfig.DEVICE_2G, "11b/g/n/ax")

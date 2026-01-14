@@ -93,7 +93,7 @@ class RemoteDeviceExecutor:
             self._exec_command_verbose("whoami", "Check remote user identity")
 
         # Create remote root directory
-        logger.info(f"[DEPLOY] [DIR] Verifying/Creating remote root directory: {self.remote_dir}")
+        logger.debug(f"[DEPLOY] Verifying/Creating remote root directory: {self.remote_dir}")
 
         # Abstraction for directory creation
         if self.os_type == "Linux":
@@ -103,7 +103,7 @@ class RemoteDeviceExecutor:
 
         exit_status, out, err = self._exec_command_verbose(create_cmd, "Create Remote Root Dir")
         if exit_status != 0:
-            logger.error(f"[DEPLOY] [ERROR] Root creation failed: {err}")
+            logger.error(f"[DEPLOY] Root creation failed: {err}")
             raise RuntimeError(f"Mkdir failed: {err}")  # Changed Exception to RuntimeError
 
         # Files to upload (Core Scripts)
@@ -117,13 +117,13 @@ class RemoteDeviceExecutor:
         # Execute transfer
         try:
             with SCPClient(self.ssh.get_transport()) as scp:
-                logger.info("[DEPLOY] [SCP] Transport session established.")
+                logger.debug("[DEPLOY] Transport session established.")
 
                 # Upload core scripts
                 for filename in files_to_sync:
                     local_path = Paths.get_validated_path(filename)
                     if not local_path.exists():
-                        logger.warning(f"[DEPLOY] [WARN] Missing file: {filename}")
+                        logger.warning(f"[DEPLOY] Missing file: {filename}")
                         continue
 
                     file_size = local_path.stat().st_size  # Use pathlib
@@ -131,20 +131,13 @@ class RemoteDeviceExecutor:
                     # Force forward slashes for SCP compatibility regardless of OS
                     remote_dest_path = f"{self.remote_dir}/{filename}".replace("\\", "/")
 
-                    logger.info(f"[DEPLOY] [FILE] Uploading: {filename} ({file_size} bytes)")
+                    logger.debug(f"[DEPLOY] Uploading: {filename} ({file_size} bytes)")
                     scp.put(str(local_path), remote_path=remote_dest_path)
 
                 # Upload resources folder (manual recursion)
                 if Paths.RESOURCES_DIR.exists():
                     logger.info("-" * 50)
-                    logger.info("[DEPLOY] [RESOURCES] Starting manual resource transfer...")
-
-                    # ... (keep existing recursion logic, it is robust enough)
-
-                # Upload resources folder (manual recursion)
-                if Paths.RESOURCES_DIR.exists():
-                    logger.info(f"--------------------------------------------------")
-                    logger.info(f"[DEPLOY] [RESOURCES] Starting manual resource transfer...")
+                    logger.debug("[DEPLOY] Starting manual resource transfer...")
 
                     # Base remote resources directory
                     remote_res_dir = f"{self.remote_dir}/resources".replace("\\", "/")
@@ -175,15 +168,15 @@ class RemoteDeviceExecutor:
                                 self._exec_command_verbose(dir_cmd, f"Create Remote Dir: {remote_parent_dir}")
                                 created_remote_dirs.add(remote_parent_dir)
 
-                            logger.info(f"[DEPLOY] [RES-FILE] Uploading: {file} -> resources/{rel_path.as_posix()}")
+                            logger.debug(f"[DEPLOY] Uploading: {file} -> resources/{rel_path.as_posix()}")
                             scp.put(str(local_file_path), remote_path=remote_file_path)
 
-                    logger.info(f"[DEPLOY] [RESOURCES] Resource transfer completed.")
+                    logger.debug(f"[DEPLOY] Resource transfer completed.")
                 else:
-                    logger.warning(f"[DEPLOY] [WARN] No resources directory found.")
+                    logger.warning(f"[DEPLOY] No resources directory found.")
 
-            logger.info("[DEPLOY] [COMPLETED] Deployment sequence finished successfully.")
-            logger.info(f"--------------------------------------------------")
+            logger.info("[DEPLOY] Deployment sequence finished successfully.")
+            logger.info("-" * 50)
 
         except Exception as e:
             logger.error(f"[DEPLOY] [CRITICAL] SCP Transfer failed: {e}")

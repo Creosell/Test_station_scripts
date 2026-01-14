@@ -76,7 +76,7 @@ class DeviceManager:
                 # Set power plan to High Performance and disable sleep/display timeout
                 commands = [
                     # Set active power scheme to High Performance
-                    'powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c',
+                    # 'powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c',
                     # Disable monitor timeout (AC)
                     'powercfg /change monitor-timeout-ac 0',
                     # Disable sleep timeout (AC)
@@ -465,6 +465,25 @@ class DeviceManager:
         except Exception:
             pass
         return False
+
+    def get_wifi_connection_info(self) -> str:
+        """
+        Get current WiFi connection details (standard, channel, signal).
+
+        :return: Connection info string
+        """
+        if self.os_type == "Windows":
+            result = subprocess.run(
+                ["netsh", "wlan", "show", "interface"],
+                capture_output=True, text=True
+            )
+            return result.stdout
+        else:
+            result = subprocess.run(
+                ["iw", "dev", "wlan0", "link"],
+                capture_output=True, text=True
+            )
+            return result.stdout
 
     def run_iperf(self):
         """

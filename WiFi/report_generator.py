@@ -194,7 +194,7 @@ class ReportGenerator:
                     result = test['result']
 
                     if result:
-                        speed_class = result.get_speed_class()
+                        speed_class = result.get_speed_class(test['standard'])
                         html_parts.append(f'''
                         <tr>
                             <td>Ch {channel}</td>
