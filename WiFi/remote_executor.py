@@ -28,6 +28,7 @@ class RemoteDeviceExecutor:
         :param device_config: Dictionary containing device connection parameters
         """
         self.config = device_config
+        self.name = device_config["name"]
         self.ip = device_config["ip"]
         self.user = device_config["user"]
         self.password = device_config["password"]
@@ -41,7 +42,7 @@ class RemoteDeviceExecutor:
         """
         Establish SSH connection to DUT and deploy test scripts.
         """
-        logger.info(f"Connecting to DUT {self.ip}...")
+        logger.info(f"{self.name}: Connecting to DUT {self.ip}...")
         self.ssh = paramiko.SSHClient()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.ssh.connect(self.ip, username=self.user, password=self.password, timeout=Timings.SSH_TIMEOUT)
@@ -62,22 +63,22 @@ class RemoteDeviceExecutor:
         :param description: Human-readable description for logging
         :return: Tuple of (exit_status, stdout, stderr)
         """
-        logger.debug(f"[SSH CMD] {description}: {cmd}")
+        logger.debug(f"{self.name}: {description}: {cmd}")
         stdin, stdout, stderr = self.ssh.exec_command(cmd)
         exit_status = stdout.channel.recv_exit_status()
         out_str = stdout.read().decode().strip()
         err_str = stderr.read().decode().strip()
 
         if exit_status != 0:
-            logger.error(f"[SSH ERR] {description} Failed (Exit {exit_status})")
+            logger.error(f"{self.name}: {description} Failed (Exit {exit_status})")
             if out_str:
-                logger.error(f"STDOUT: {out_str}")
+                logger.error(f"{self.name}: STDOUT: {out_str}")
             if err_str:
-                logger.error(f"STDERR: {err_str}")
+                logger.error(f"{self.name}: STDERR: {err_str}")
         else:
-            logger.debug(f"[SSH OK] {description}")
+            logger.debug(f"{self.name}: {description}")
             if out_str:
-                logger.debug(f"STDOUT: {out_str}")
+                logger.debug(f"{self.name}: STDOUT: {out_str}")
 
         return exit_status, out_str, err_str
 
@@ -86,14 +87,14 @@ class RemoteDeviceExecutor:
         Deploy test scripts and resources to remote device via SCP.
         Manually handles directory structures to avoid SCP recursive limitations on Windows.
         """
-        logger.info(f"[DEPLOY] Initiating deployment sequence to target: {self.remote_dir}")
+        logger.info(f"{self.name}: Initiating deployment sequence to target: {self.remote_dir}")
 
         # Debug info
         if self.os_type == "Windows":
             self._exec_command_verbose("whoami", "Check remote user identity")
 
         # Create remote root directory
-        logger.debug(f"[DEPLOY] Verifying/Creating remote root directory: {self.remote_dir}")
+        logger.debug(f"{self.name}: Verifying/Creating remote root directory: {self.remote_dir}")
 
         # Abstraction for directory creation
         if self.os_type == "Linux":
@@ -103,7 +104,7 @@ class RemoteDeviceExecutor:
 
         exit_status, out, err = self._exec_command_verbose(create_cmd, "Create Remote Root Dir")
         if exit_status != 0:
-            logger.error(f"[DEPLOY] Root creation failed: {err}")
+            logger.error(f"{self.name}: Root creation failed: {err}")
             raise RuntimeError(f"Mkdir failed: {err}")  # Changed Exception to RuntimeError
 
         # Files to upload (Core Scripts)
@@ -117,13 +118,13 @@ class RemoteDeviceExecutor:
         # Execute transfer
         try:
             with SCPClient(self.ssh.get_transport()) as scp:
-                logger.debug("[DEPLOY] Transport session established.")
+                logger.debug(f"{self.name}: Transport session established.")
 
                 # Upload core scripts
                 for filename in files_to_sync:
                     local_path = Paths.get_validated_path(filename)
                     if not local_path.exists():
-                        logger.warning(f"[DEPLOY] Missing file: {filename}")
+                        logger.warning(f"{self.name}: Missing file: {filename}")
                         continue
 
                     file_size = local_path.stat().st_size  # Use pathlib
@@ -131,13 +132,13 @@ class RemoteDeviceExecutor:
                     # Force forward slashes for SCP compatibility regardless of OS
                     remote_dest_path = f"{self.remote_dir}/{filename}".replace("\\", "/")
 
-                    logger.debug(f"[DEPLOY] Uploading: {filename} ({file_size} bytes)")
+                    logger.debug(f"{self.name}: Uploading: {filename} ({file_size} bytes)")
                     scp.put(str(local_path), remote_path=remote_dest_path)
 
                 # Upload resources folder (manual recursion)
                 if Paths.RESOURCES_DIR.exists():
                     logger.info("-" * 50)
-                    logger.debug("[DEPLOY] Starting manual resource transfer...")
+                    logger.debug(f"{self.name}: Starting manual resource transfer...")
 
                     # Base remote resources directory
                     remote_res_dir = f"{self.remote_dir}/resources".replace("\\", "/")
@@ -168,18 +169,18 @@ class RemoteDeviceExecutor:
                                 self._exec_command_verbose(dir_cmd, f"Create Remote Dir: {remote_parent_dir}")
                                 created_remote_dirs.add(remote_parent_dir)
 
-                            logger.debug(f"[DEPLOY] Uploading: {file} -> resources/{rel_path.as_posix()}")
+                            logger.debug(f"{self.name}: Uploading: {file} -> resources/{rel_path.as_posix()}")
                             scp.put(str(local_file_path), remote_path=remote_file_path)
 
-                    logger.debug(f"[DEPLOY] Resource transfer completed.")
+                    logger.debug(f"{self.name}: Resource transfer completed.")
                 else:
-                    logger.warning(f"[DEPLOY] No resources directory found.")
+                    logger.warning(f"{self.name}: No resources directory found.")
 
-            logger.info("[DEPLOY] Deployment sequence finished successfully.")
+            logger.info(f"{self.name}: Deployment sequence finished successfully.")
             logger.info("-" * 50)
 
         except Exception as e:
-            logger.error(f"[DEPLOY] [CRITICAL] SCP Transfer failed: {e}")
+            logger.error(f"{self.name}: Critical SCP Transfer failed: {e}")
             raise
 
     def _run_agent_command(self, cmd_args, timeout=None):
@@ -193,7 +194,7 @@ class RemoteDeviceExecutor:
         else:
             full_cmd = f"cd {self.remote_dir} && {self.python_cmd} agent.py {cmd_args}"
 
-        logger.debug(f"Executing Agent Command: {full_cmd}")
+        logger.debug(f"{self.name}: Executing Agent Command: {full_cmd}")
 
         try:
             # Set transport timeout explicitly
@@ -215,21 +216,21 @@ class RemoteDeviceExecutor:
             err_str = stderr.read().decode().strip()
 
             if exit_status != 0:
-                logger.error(f"Remote Agent Error (Exit {exit_status}):\nSTDOUT: {out_str}\nSTDERR: {err_str}")
+                logger.error(f"{self.name}: Remote Agent Error (Exit {exit_status}):\nSTDOUT: {out_str}\nSTDERR: {err_str}")
                 return False, None
 
             if "RESULT:SUCCESS" in out_str:
                 return True, out_str
             else:
-                logger.error(f"Agent Logic Failure: {out_str}")
+                logger.error(f"{self.name}: Agent Logic Failure: {out_str}")
                 return False, out_str
 
         except socket.timeout:
-            logger.warning(f"Agent command timed out after {timeout}s (Expected behavior during WiFi switch)")
+            logger.warning(f"{self.name}: Agent command timed out after {timeout}s (Expected behavior during WiFi switch)")
             return False, None
         except Exception as e:
             # Let caller handle connection drops (e.g. for WiFi switching)
-            logger.debug(f"Command execution interrupted: {e}")
+            logger.debug(f"{self.name}: Command execution interrupted: {e}")
             raise
 
     def run_agent_command(self, cmd_args, timeout=None):
@@ -251,7 +252,7 @@ class RemoteDeviceExecutor:
         """
         Remove all WiFi network profiles on remote device.
         """
-        logger.info("Remote: Forgetting networks...")
+        logger.info(f"{self.name}: Forgetting networks...")
         self._run_agent_command("forget")
 
     def connect_wifi(self, ssid, password):
@@ -265,7 +266,7 @@ class RemoteDeviceExecutor:
         :param password: Network password
         :return: True if connection successful, False otherwise
         """
-        logger.info(f"Remote: transitioning to {ssid} (with cleanup)...")
+        logger.info(f"{self.name}: Transitioning to {ssid} (with cleanup)...")
 
         # Build command with cleanup flag
         cmd = f"connect --ssid {ssid} --password {password} --cleanup"
@@ -276,12 +277,12 @@ class RemoteDeviceExecutor:
 
             # If command returned result without link drop (rare but possible)
             if success:
-                logger.info(f"Remote: Connected to {ssid} (Link maintained)")
+                logger.info(f"{self.name}: Connected to {ssid} (Link maintained)")
                 return True
 
         except Exception as e:
             # This is NORMAL behavior when switching WiFi networks
-            logger.info(f"SSH connection dropped as expected during WiFi switch ({e}). Waiting for device recovery...")
+            logger.info(f"{self.name}: SSH connection dropped as expected during WiFi switch ({e}). Waiting for device recovery...")
 
         # If we reach here, link was dropped. Begin polling (waiting) for recovery.
         return self._wait_for_reconnection()
@@ -293,7 +294,7 @@ class RemoteDeviceExecutor:
 
         :return: True if device reconnected, False if timeout
         """
-        logger.info("Polling device availability...")
+        logger.info(f"{self.name}: Polling device availability...")
         start_time = time.time()
 
         while time.time() - start_time < self.POLLING_TIMEOUT:
@@ -308,16 +309,16 @@ class RemoteDeviceExecutor:
                 # Short timeout for connectivity check
                 self.ssh.connect(self.ip, username=self.user, password=self.password, timeout=5)
 
-                logger.info("Device is back online! Verifying agent status...")
+                logger.info(f"{self.name}: Device is back online! Verifying agent status...")
                 return True
             except (socket.error, paramiko.SSHException):
                 time.sleep(self.POLLING_INTERVAL)
                 print(".", end="", flush=True)
             except Exception as e:
-                logger.error(f"Unexpected error during polling: {e}")
+                logger.error(f"{self.name}: Unexpected error during polling: {e}")
                 time.sleep(self.POLLING_INTERVAL)
 
-        logger.error("Timed out waiting for device to reconnect.")
+        logger.error(f"{self.name}: Timed out waiting for device to reconnect.")
         return False
 
     def run_iperf(self):
@@ -328,20 +329,20 @@ class RemoteDeviceExecutor:
         """
         # Retrieve the dynamically assigned port
         port = self.config.get('iperf_port', 5201)
-        logger.info(f"Remote: Running iperf on port {port}...")
+        logger.info(f"{self.name}: Running iperf on port {port}...")
 
 
-        logger.debug(f"Remote: Running iperf on port {port}...")
+        logger.debug(f"{self.name}: Running iperf on port {port}...")
         success, output = self._run_agent_command(f"iperf --port {port}")
         if success and "IPERF_OUTPUT_START" in output:
             try:
                 start = output.find("IPERF_OUTPUT_START") + len("IPERF_OUTPUT_START")
                 end = output.find("IPERF_OUTPUT_END")
                 iperf_log = output[start:end].strip()
-                logger.info(f"Remote Iperf Result:\n{iperf_log}")
+                logger.info(f"{self.name}: Iperf Result:\n{iperf_log}")
                 return iperf_log
             except Exception:
-                logger.error("Failed to parse Iperf output markers")
+                logger.error(f"{self.name}: Failed to parse Iperf output markers")
         return None
 
     def init_remote_report(self, device_name, ip_address):
@@ -361,10 +362,10 @@ class RemoteDeviceExecutor:
             for line in output.split('\n'):
                 if line.startswith("REPORT_PATH:"):
                     remote_path = line.split(":", 1)[1].strip()
-                    logger.info(f"Remote report initialized: {remote_path}")
+                    logger.info(f"{self.name}: Remote report initialized: {remote_path}")
                     return remote_path
 
-        logger.error("Failed to initialize remote report")
+        logger.error(f"{self.name}: Failed to initialize remote report")
         return None
 
     def add_remote_test_result(self, report_path, band, ssid, standard, channel, iperf_output):
@@ -387,10 +388,10 @@ class RemoteDeviceExecutor:
         success, output = self._run_agent_command(cmd, timeout=10)
 
         if success:
-            logger.info(f"Test result added to remote report: {band}/{standard}/Ch{channel}")
+            logger.info(f"{self.name}: Test result added to remote report: {band}/{standard}/Ch{channel}")
             return True
         else:
-            logger.warning(f"Failed to add result to remote report")
+            logger.warning(f"{self.name}: Failed to add result to remote report")
             return False
 
     def download_report(self, remote_path, local_dir):
@@ -407,9 +408,9 @@ class RemoteDeviceExecutor:
 
             with SCPClient(self.ssh.get_transport()) as scp:
                 scp.get(remote_path.replace("\\", "/"), str(local_path))
-                logger.info(f"Report downloaded: {local_path.name}")
+                logger.info(f"{self.name}: Report downloaded: {local_path.name}")
                 return str(local_path)
 
         except Exception as e:
-            logger.error(f"Failed to download report: {e}")
+            logger.error(f"{self.name}: Failed to download report: {e}")
             return None
