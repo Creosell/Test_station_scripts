@@ -66,7 +66,8 @@ class DUTConfig:
             "user": "slave",
             "password": "66668888",
             "os": "Windows",
-            "python_path": "python"
+            "python_path": "python",
+            "system_product": "Unknown"
         }
     ]
 
@@ -124,10 +125,10 @@ class Limits:
 
 # --- WIFI CONFIGURATION ---
 ENCRYPTIONS = ["psk", "psk2", "psk-mixed", "sae", "sae-mixed"]
-#WIFI_STANDARDS_2G = ["11b", "11g", "11n", "11ax"]
-#WIFI_STANDARDS_5G = ["11a", "11n", "11ac", "11ax"]
 WIFI_STANDARDS_2G = ["11b/g/n","11n/ax"]
 WIFI_STANDARDS_5G = ["11a/n/ac", "11ac/ax"]
+WIFI_STANDARDS_2G = ["11b/g/n"]
+WIFI_STANDARDS_5G = ["11a/n/ac"]
 
 NETWORKS = {
     "2G": {

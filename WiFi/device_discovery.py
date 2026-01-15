@@ -7,6 +7,7 @@ Automatically discovers test devices (DUTs) in the network by:
 3. Detecting OS type (Windows/Linux)
 4. Auto-populating device configuration
 """
+from sys import platform
 
 import paramiko
 import logging
@@ -164,6 +165,7 @@ class DeviceDiscovery:
 
             # Detect Python path
             python_path = self._detect_python_path(ssh, os_type)
+            system_product = self._detect_system_product(ssh, os_type)
 
             ssh.close()
 
@@ -174,7 +176,8 @@ class DeviceDiscovery:
                 'user': user,
                 'password': password,
                 'os': os_type,
-                'python_path': python_path
+                'python_path': python_path,
+                'system_product': system_product
             }
 
         except (paramiko.AuthenticationException, paramiko.SSHException, socket.timeout) as e:
@@ -188,6 +191,41 @@ class DeviceDiscovery:
             if ssh:
                 ssh.close()
             return None
+
+    def _detect_system_product(self, ssh: paramiko.SSHClient, os_type: str) -> str:
+        """
+        Detect system product name on remote device.
+
+        :param ssh: Active SSH connection
+        :param os_type: 'Windows' or 'Linux'
+        :return: System product name
+        """
+        try:
+            if os_type == "Windows":
+                cmd = "powershell -Command \"Get-CimInstance -ClassName Win32_ComputerSystemProduct | Select-Object -ExpandProperty Name\""
+                stdin, stdout, stderr = ssh.exec_command(cmd, timeout=5)
+                exit_status = stdout.channel.recv_exit_status()
+
+                if exit_status == 0 and stdout.read().decode().strip():
+                    return stdout.read().decode().strip()
+
+            elif os_type == "Linux":
+                try:
+                    stdin, stdout, stderr = ssh.exec_command("cat /sys/devices/virtual/dmi/id/product_name", timeout=5)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    if exit_status == 0:
+                        product = stdout.read().decode().strip()
+                        if product:
+                            return product
+                except:
+                    pass
+
+            return platform.node() if hasattr(platform, 'node') else "Unknown"
+
+        except Exception as e:
+            logger.debug(f"System product detection failed: {e}")
+            return "Unknown"
 
     def _detect_os_type(self, ssh: paramiko.SSHClient) -> Optional[str]:
         """
@@ -270,7 +308,8 @@ def generate_config_code(devices: List[Dict]) -> str:
         code_lines.append(f"        'user': '{device['user']}',")
         code_lines.append(f"        'password': '{device['password']}',")
         code_lines.append(f"        'os': '{device['os']}',")
-        code_lines.append(f"        'python_path': '{device['python_path']}'")
+        code_lines.append(f"        'python_path': '{device['python_path']}',")
+        code_lines.append(f"        'system_product': '{device.get('system_product', 'Unknown')}'")  # ADD THIS
         code_lines.append("    },")
 
     code_lines.append("]")

@@ -159,16 +159,16 @@ class ReportGenerator:
             for standard in sorted(tests_by_standard.keys()):
                 standard_tests = tests_by_standard[standard]
 
+                # Sort tests by channel
+                standard_tests_sorted = sorted(standard_tests, key=lambda x: x['channel'])
+
                 # Calculate statistics
                 bandwidths = [t['result'].bandwidth for t in standard_tests if t['result']]
                 if bandwidths:
                     avg_bw = sum(bandwidths) / len(bandwidths)
-                    min_bw = min(bandwidths)
-                    max_bw = max(bandwidths)
-                    stats_html = f'avg: {avg_bw:.1f} | min: {min_bw:.1f} | max: {max_bw:.1f} Mbps'
                     avg_class = self._get_speed_class_from_value(avg_bw)
                 else:
-                    stats_html = 'No valid results'
+                    avg_bw = 0
                     avg_class = 'speed-poor'
 
                 # Standard subheader
@@ -176,40 +176,34 @@ class ReportGenerator:
                 <div class="standard-group">
                     <div class="standard-header">
                         <span class="standard-name">{standard}</span>
-                        <span class="speed-indicator {avg_class}">{stats_html}</span>
                     </div>
                     <table>
                         <thead>
                             <tr>
-                                <th>Channel</th>
-                                <th>Bandwidth</th>
-                            </tr>
-                        </thead>
-                        <tbody>
                 ''')
 
-                # Test rows
-                for test in sorted(standard_tests, key=lambda x: x['channel']):
-                    channel = test['channel']
-                    result = test['result']
+                # Channel headers
+                for test in standard_tests_sorted:
+                    html_parts.append(f'<th>Ch {test["channel"]}</th>')
 
+                html_parts.append('<th>Avg</th>')
+                html_parts.append('</tr></thead><tbody><tr>')
+
+                # Channel data
+                for test in standard_tests_sorted:
+                    result = test['result']
                     if result:
                         speed_class = result.get_speed_class(test['standard'])
-                        html_parts.append(f'''
-                        <tr>
-                            <td>Ch {channel}</td>
-                            <td><span class="speed-indicator {speed_class}">{result.bandwidth:.1f} Mbits/sec</span></td>
-                        </tr>
-                        ''')
+                        html_parts.append(
+                            f'<td><span class="speed-indicator {speed_class}">{result.bandwidth:.1f}</span></td>')
                     else:
-                        html_parts.append(f'''
-                        <tr>
-                            <td>Ch {channel}</td>
-                            <td style="color: #dc3545;">Test Failed</td>
-                        </tr>
-                        ''')
+                        html_parts.append('<td><span class="speed-indicator speed-poor">—</span></td>')
+
+                # Average column
+                html_parts.append(f'<td><span class="speed-indicator {avg_class}">{avg_bw:.1f}</span></td>')
 
                 html_parts.append('''
+                            </tr>
                         </tbody>
                     </table>
                 </div>

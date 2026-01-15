@@ -113,44 +113,66 @@ class WiFiTestOrchestrator:
         remote_report_path = None
 
         try:
-            # Get system product name from DUT
-            stdout, stderr = device_executor.run_agent_command("sysinfo")
-            system_product_name = "Unknown"
-            for line in stdout.split('\n'):
-                if line.startswith("SYSTEM_PRODUCT:"):
-                    system_product_name = line.split(":", 1)[1].strip()
-                    break
+            # Get system product from config or query device
+            system_product_name = device_conf.get('system_product', 'Unknown')
+
+            if system_product_name == 'Unknown':
+                stdout, stderr = device_executor.run_agent_command("sysinfo")
+                for line in stdout.split('\n'):
+                    if line.startswith("SYSTEM_PRODUCT:"):
+                        system_product_name = line.split(":", 1)[1].strip()
+                        break
 
             logger.info(f"Device identified: {system_product_name}")
 
-            # Initialize report on DUT (incremental approach)
+            # Initialize report on DUT
             remote_report_path = device_executor.init_remote_report(system_product_name, device_ip)
 
             if not remote_report_path:
                 logger.error("Failed to initialize remote report, tests will run without reporting")
 
-            # Run band tests with incremental reporting
+            # Run band tests
             self.test_band(device_executor, "2G", NETWORKS["2G"], remote_report_path)
             time.sleep(Timings.BAND_TEST_DELAY)
             self.test_band(device_executor, "5G", NETWORKS["5G"], remote_report_path)
 
-            # Download final report from DUT
+            # Download final report with new structure
             if remote_report_path:
-                local_path = device_executor.download_report(remote_report_path, str(ReportPaths.LOCAL_REPORTS_DIR))
+                # Create structured path: reports/{system_product}/{date}/
+                from datetime import datetime
+                testing_day = datetime.now().strftime('%Y-%m-%d')
+
+                # Sanitize system_product for filesystem
+                import re
+                safe_product = re.sub(r'[^\w\-]', '_', system_product_name)
+
+                report_subdir = ReportPaths.LOCAL_REPORTS_DIR / safe_product / testing_day
+                report_subdir.mkdir(parents=True, exist_ok=True)
+
+                local_path = device_executor.download_report(remote_report_path, str(report_subdir))
                 if local_path:
-                    logger.info(f"✓ Report saved locally: {Path(local_path).name}")
+                    logger.info(f"✓ Report saved: {Path(local_path).relative_to(ReportPaths.LOCAL_REPORTS_DIR)}")
                 else:
                     logger.warning("Failed to download report from DUT")
 
         except Exception as e:
             logger.error(f"Device test sequence aborted: {e}")
 
-            # Still try to download partial report
             if remote_report_path:
                 try:
-                    local_path = device_executor.download_report(remote_report_path, str(ReportPaths.LOCAL_REPORTS_DIR))
+                    from datetime import datetime
+                    import re
+
+                    testing_day = datetime.now().strftime('%Y-%m-%d')
+                    safe_product = re.sub(r'[^\w\-]', '_', device_conf.get('system_product', 'Unknown'))
+
+                    report_subdir = ReportPaths.LOCAL_REPORTS_DIR / safe_product / testing_day
+                    report_subdir.mkdir(parents=True, exist_ok=True)
+
+                    local_path = device_executor.download_report(remote_report_path, str(report_subdir))
                     if local_path:
-                        logger.warning(f"Partial report downloaded: {Path(local_path).name}")
+                        logger.warning(
+                            f"Partial report downloaded: {Path(local_path).relative_to(ReportPaths.LOCAL_REPORTS_DIR)}")
                 except:
                     pass
 
@@ -253,6 +275,7 @@ class WiFiTestOrchestrator:
         device_executors = {}
         remote_report_paths = {}
         device_failure_counts = {}  # Track consecutive failures
+        results = {}
 
         logger.info("Initializing all devices...")
         for device_conf in DUTConfig.DEVICES:
@@ -291,9 +314,14 @@ class WiFiTestOrchestrator:
             logger.error("No devices initialized successfully")
             return {}
 
+        # Flag to track interruption
+        interrupted = False
+
         # Test both bands with synchronized channel switching
         try:
             for band_key in ["2G", "5G"]:
+                if interrupted: break
+
                 net_config = NETWORKS[band_key]
                 band_display = "2.4 GHz" if band_key == "2G" else "5 GHz"
                 standards = WIFI_STANDARDS_2G if band_key == "2G" else WIFI_STANDARDS_5G
@@ -301,6 +329,8 @@ class WiFiTestOrchestrator:
                 logger.info(f"\n=== Starting {band_display} Band Tests ===")
 
                 for standard in standards:
+                    if interrupted: break
+
                     logger.info(f"Testing Standard: {standard}")
 
                     try:
@@ -309,8 +339,9 @@ class WiFiTestOrchestrator:
                         logger.error(f"Failed to set standard {standard}: {e}")
                         continue
 
-
                     for channel in net_config["channels"]:
+                        if interrupted: break
+
                         logger.info(f"\n>>> Testing Channel {channel} ({standard}) on ALL devices <<<")
 
                         # Switch router to this channel (ONE TIME for all devices)
@@ -329,6 +360,7 @@ class WiFiTestOrchestrator:
 
                         if not active_devices:
                             logger.error("All devices have failed persistently, aborting")
+                            interrupted = True  # Abort loops
                             break
 
                         excluded_count = len(device_executors) - len(active_devices)
@@ -355,20 +387,36 @@ class WiFiTestOrchestrator:
                             else:
                                 device_failure_counts[device_name] = 0  # Reset on success
 
-                time.sleep(Timings.BAND_TEST_DELAY)
+                if not interrupted:
+                    time.sleep(Timings.BAND_TEST_DELAY)
 
         except KeyboardInterrupt:
-            logger.warning("\n⚠ Parallel testing interrupted")
-            raise
+            logger.warning("\n⚠ Parallel testing interrupted (saving partial results...)")
+            interrupted = True
 
         finally:
             # Download reports and cleanup all devices
-            results = {}
             for device_name, executor in device_executors.items():
                 try:
                     remote_path = remote_report_paths.get(device_name)
                     if remote_path:
-                        local_path = executor.download_report(remote_path, str(ReportPaths.LOCAL_REPORTS_DIR))
+                        # Find device config to get system_product
+                        device_conf = next((d for d in DUTConfig.DEVICES if d['name'] == device_name), None)
+
+                        if device_conf:
+                            from datetime import datetime
+                            import re
+
+                            testing_day = datetime.now().strftime('%Y-%m-%d')
+                            safe_product = re.sub(r'[^\w\-]', '_', device_conf.get('system_product', 'Unknown'))
+
+                            report_subdir = ReportPaths.LOCAL_REPORTS_DIR / safe_product / testing_day
+                            report_subdir.mkdir(parents=True, exist_ok=True)
+
+                            local_path = executor.download_report(remote_path, str(report_subdir))
+                        else:
+                            local_path = executor.download_report(remote_path, str(ReportPaths.LOCAL_REPORTS_DIR))
+
                         if local_path:
                             logger.info(f"✓ [{device_name}] Report downloaded")
                             results[device_name] = {'success': True, 'error': None}
@@ -376,10 +424,10 @@ class WiFiTestOrchestrator:
                             results[device_name] = {'success': False, 'error': 'Report download failed'}
 
                     # Re-enable sleep
-                    try:
-                        executor.run_agent_command("allow_sleep")
-                    except:
-                        pass
+                    # try:
+                    #     executor.run_agent_command("allow_sleep")
+                    # except:
+                    #     pass
 
                     executor.close()
 
@@ -397,7 +445,10 @@ class WiFiTestOrchestrator:
                 failures = device_failure_counts.get(device, 0)
                 logger.info(f"{status} - {device} (failures: {failures})")
 
-            return results
+            if interrupted:
+                logger.warning("⚠ Tests completed partially due to interruption")
+
+        return results
 
     def _test_channel_on_all_devices(self, device_executors, remote_report_paths,
                                      ssid, password, band_display, standard, channel, max_workers):
