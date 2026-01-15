@@ -61,12 +61,13 @@ class NetworkConfig:
     SSID_2G = "QA_Test_2G"
     SSID_5G = "QA_Test_5G"
     WIFI_PASSWORD = "66668888"
-    SSH_PASSWORD = "66668888"
-    SSH_USER = "root"
-    DEVICE_2G = "mt798111"
-    DEVICE_5G = "mt798112"
     ROUTER_IP = "192.168.50.1"
     IPERF_SERVER_IP = "192.168.50.1"
+    SSH_USER = "root"
+    SSH_PASSWORD = "66668888"
+    DEVICE_2G = "mt798111"
+    DEVICE_5G = "mt798112"
+
 
     # Pool of ports available for parallel testing (5201-5221)
     IPERF_PORTS = list(range(5201, 5222))
@@ -144,8 +145,8 @@ class Limits:
 ENCRYPTIONS = ["psk", "psk2", "psk-mixed", "sae", "sae-mixed"]
 WIFI_STANDARDS_2G = ["11b/g/n","11n/ax"]
 WIFI_STANDARDS_5G = ["11a/n/ac", "11ac/ax"]
-WIFI_STANDARDS_2G = ["11b/g/n"]
-WIFI_STANDARDS_5G = ["11a/n/ac"]
+# WIFI_STANDARDS_2G = ["11b/g/n"]
+# WIFI_STANDARDS_5G = ["11a/n/ac"]
 
 NETWORKS = {
     "2G": {
@@ -153,16 +154,16 @@ NETWORKS = {
         "password": NetworkConfig.WIFI_PASSWORD,
         "device": NetworkConfig.DEVICE_2G,
         "encryption": "psk2",
-        #"channels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-        "channels": [13]
+        "channels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        #"channels": [13]
     },
     "5G": {
         "ssid": NetworkConfig.SSID_5G,
         "password": NetworkConfig.WIFI_PASSWORD,
         "device": NetworkConfig.DEVICE_5G,
         "encryption": "psk2",
-        #"channels": [36, 40, 44, 48, 149, 153, 157, 161, 165]
-        "channels": [165]
+        "channels": [36, 40, 44, 48, 149, 153, 157, 161, 165]
+        #"channels": [165]
     }
 }
 
