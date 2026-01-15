@@ -1,11 +1,11 @@
 # wifi_orchestrator.py
 import time
-import logging
 from pathlib import Path
+
 from config import (setup_logging, NETWORKS, WIFI_STANDARDS_2G, WIFI_STANDARDS_5G,
-                    Timings, Limits, DUTConfig, ReportPaths)
-from router_manager import RouterManager
+                    Timings, Limits, DUTConfig, ReportPaths, NetworkConfig)
 from remote_executor import RemoteDeviceExecutor
+from router_manager import RouterManager
 
 # Initialize logging
 logger = setup_logging()
@@ -13,7 +13,7 @@ logger = setup_logging()
 
 class WiFiTestOrchestrator:
     """
-    Orchestrates WiFi performance tests across multiple devices with automatic HTML report generation.
+    Orchestrates Wi-Fi performance tests across multiple devices with automatic HTML report generation.
     Supports incremental reporting, parallel execution, and checkpoint/resume capability.
     """
 
@@ -27,8 +27,28 @@ class WiFiTestOrchestrator:
         self.enable_checkpoints = enable_checkpoints
         self.checkpoint_file = Path("test_checkpoint.json") if enable_checkpoints else None
 
+        # Dynamically assign unique iperf ports to configured devices
+        self._assign_iperf_ports()
+
         # Ensure local reports directory exists
         ReportPaths.LOCAL_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+
+    def _assign_iperf_ports(self):
+        """
+        Assigns a unique iperf port from the pool to each device in DUTConfig.
+        """
+        available_ports = NetworkConfig.IPERF_PORTS
+        devices = DUTConfig.DEVICES
+
+        if len(devices) > len(available_ports):
+            logger.warning("Not enough iperf ports for all devices! Some may conflict.")
+
+        for idx, device in enumerate(devices):
+            # Use modulo to cycle ports if devices > ports (though ideally shouldn't happen)
+            port_idx = idx % len(available_ports)
+            assigned_port = available_ports[port_idx]
+            device['iperf_port'] = assigned_port
+            logger.info(f"Assigned iperf port {assigned_port} to device: {device['name']}")
 
     def run_full_suite(self):
         """
@@ -158,7 +178,7 @@ class WiFiTestOrchestrator:
 
         :param device_name: Device name being tested
         :param band: Current band (2G/5G)
-        :param standard: Current WiFi standard
+        :param standard: Current Wi-Fi standard
         :param channel: Current channel
         """
         if not self.enable_checkpoints or not self.checkpoint_file:
@@ -224,7 +244,6 @@ class WiFiTestOrchestrator:
 
         :param max_workers: Maximum number of parallel threads (default: number of devices)
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed, wait
 
         logger.info("=== Starting Synchronized Parallel WiFi Test ===")
 
@@ -391,19 +410,19 @@ class WiFiTestOrchestrator:
         :param ssid: Network SSID
         :param password: Network password
         :param band_display: Band name for display (e.g., "2.4 GHz")
-        :param standard: WiFi standard (e.g., "11n")
+        :param standard: Wi-Fi standard (e.g., "11n")
         :param channel: Channel number
         :param max_workers: Maximum parallel workers
         :return: Dict of device_name -> bool (True if failed)
         """
-        from concurrent.futures import ThreadPoolExecutor, wait, TimeoutError as FuturesTimeoutError
+        from concurrent.futures import ThreadPoolExecutor, wait
 
         failures = {}
 
         def test_device_on_channel(device_name, executor):
             """Test single device on current channel."""
             try:
-                # Connect to WiFi
+                # Connect to Wi-Fi
                 if not executor.connect_wifi(ssid, password):
                     logger.warning(f"[{device_name}] Failed to connect to {ssid}")
                     return False
@@ -479,19 +498,6 @@ class WiFiTestOrchestrator:
                     failures[device_name] = True
 
         return failures
-
-    def _cleanup(self):
-        """
-        Perform global cleanup: reset router to default settings.
-        """
-        logger.info("Global Cleanup...")
-        try:
-            self.router.set_channel_auto()
-            self.router.set_standard_auto()
-            self.router.close()
-        except Exception as e:
-            logger.error(f"Cleanup error: {e}")
-        logger.info("=== All Tests Finished ===")
 
     def _emergency_cleanup(self, executor=None):
         """

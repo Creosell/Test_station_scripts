@@ -326,8 +326,13 @@ class RemoteDeviceExecutor:
 
         :return: Raw iperf output string or None if test failed
         """
-        logger.info("Remote: Running iperf...")
-        success, output = self._run_agent_command("iperf")
+        # Retrieve the dynamically assigned port
+        port = self.config.get('iperf_port', 5201)
+        logger.info(f"Remote: Running iperf on port {port}...")
+
+
+        logger.debug(f"Remote: Running iperf on port {port}...")
+        success, output = self._run_agent_command(f"iperf --port {port}")
         if success and "IPERF_OUTPUT_START" in output:
             try:
                 start = output.find("IPERF_OUTPUT_START") + len("IPERF_OUTPUT_START")

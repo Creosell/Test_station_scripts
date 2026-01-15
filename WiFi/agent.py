@@ -21,6 +21,7 @@ def main():
 
     # Command: iperf
     cmd_iperf = subparsers.add_parser("iperf")
+    cmd_iperf.add_argument("--port", type=int, default=5201, help="Port to connect to")
 
     # Command: forget
     cmd_forget = subparsers.add_parser("forget")
@@ -64,7 +65,7 @@ def main():
                 sys.exit(1)
 
         elif args.command == "iperf":
-            output = dm.run_iperf()
+            output = dm.run_iperf(port=args.port)
             if output:
                 print(f"IPERF_OUTPUT_START\n{output}\nIPERF_OUTPUT_END")
                 print("RESULT:SUCCESS")

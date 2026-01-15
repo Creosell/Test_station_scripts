@@ -485,15 +485,15 @@ class DeviceManager:
             )
             return result.stdout
 
-    def run_iperf(self):
+    def run_iperf(self, port=5201):
         """
         Runs iperf3 test using iperf3 from system PATH (both Windows and Linux).
 
         :return: The stdout output of the iperf command or None if failed.
         """
-        cmd = ['iperf3', '-c', NetworkConfig.IPERF_SERVER_IP, '-t', Timings.IPERF_DURATION]
+        cmd = ['iperf3', '-c', NetworkConfig.IPERF_SERVER_IP, '-p', str(port), '-t', Timings.IPERF_DURATION]
 
-        logger.info(f"Running iperf3 -> {NetworkConfig.IPERF_SERVER_IP}")
+        logger.info(f"Running iperf3 -> {NetworkConfig.IPERF_SERVER_IP}:{port}")
         try:
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=Timings.IPERF_TIMEOUT)
 

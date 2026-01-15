@@ -51,6 +51,9 @@ class NetworkConfig:
     ROUTER_IP = "192.168.50.1"
     IPERF_SERVER_IP = "192.168.50.1"
 
+    # Pool of ports available for parallel testing (5201-5221)
+    IPERF_PORTS = list(range(5201, 5222))
+
 
 class DUTConfig:
     """
