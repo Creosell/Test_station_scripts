@@ -24,47 +24,6 @@ class DeviceManager:
         if self.os_type == "Windows":
             os.makedirs(str(Paths.PROFILES_DIR), exist_ok=True)
 
-    def get_system_product_name(self):
-        """
-        Retrieves system product name (manufacturer model).
-
-        :return: System product name string or "Unknown" if retrieval fails
-        """
-        try:
-            if self.os_type == "Windows":
-                # Use PowerShell to get system product name
-                cmd = ['powershell', '-Command',
-                       'Get-CimInstance -ClassName Win32_ComputerSystemProduct | Select-Object -ExpandProperty Name']
-                res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-                if res.returncode == 0 and res.stdout.strip():
-                    return res.stdout.strip()
-
-            elif self.os_type == "Linux":
-                # Try dmidecode first (requires root/sudo)
-                try:
-                    res = subprocess.run(['sudo', 'dmidecode', '-s', 'system-product-name'],
-                                         capture_output=True, text=True, timeout=5)
-                    if res.returncode == 0 and res.stdout.strip():
-                        return res.stdout.strip()
-                except:
-                    pass
-
-                # Fallback: read from /sys filesystem
-                try:
-                    with open('/sys/devices/virtual/dmi/id/product_name', 'r') as f:
-                        product = f.read().strip()
-                        if product:
-                            return product
-                except:
-                    pass
-
-            # Fallback: use hostname
-            return platform.node()
-
-        except Exception as e:
-            logger.warning(f"Could not retrieve system product name: {e}")
-            return "Unknown"
-
     def prevent_sleep(self):
         """
         Prevent system sleep and screen timeout during testing.

@@ -110,19 +110,10 @@ class WiFiTestOrchestrator:
         """
         device_name = device_conf['name']
         device_ip = device_conf['ip']
+        system_product_name = device_conf.get('system_product')
         remote_report_path = None
 
         try:
-            # Get system product from config or query device
-            system_product_name = device_conf.get('system_product', 'Unknown')
-
-            if system_product_name == 'Unknown':
-                stdout, stderr = device_executor.run_agent_command("sysinfo")
-                for line in stdout.split('\n'):
-                    if line.startswith("SYSTEM_PRODUCT:"):
-                        system_product_name = line.split(":", 1)[1].strip()
-                        break
-
             logger.info(f"Device identified: {system_product_name}")
 
             # Initialize report on DUT
@@ -142,11 +133,7 @@ class WiFiTestOrchestrator:
                 from datetime import datetime
                 testing_day = datetime.now().strftime('%Y-%m-%d')
 
-                # Sanitize system_product for filesystem
-                import re
-                safe_product = re.sub(r'[^\w\-]', '_', system_product_name)
-
-                report_subdir = ReportPaths.LOCAL_REPORTS_DIR / safe_product / testing_day
+                report_subdir = ReportPaths.LOCAL_REPORTS_DIR / system_product_name / testing_day
                 report_subdir.mkdir(parents=True, exist_ok=True)
 
                 local_path = device_executor.download_report(remote_report_path, str(report_subdir))
@@ -292,12 +279,7 @@ class WiFiTestOrchestrator:
                     logger.warning(f"[{device_name}] Could not prevent sleep: {e}")
 
                 # Get system info and initialize remote report
-                stdout, _ = executor.run_agent_command("sysinfo")
-                system_product_name = "Unknown"
-                for line in stdout.split('\n'):
-                    if line.startswith("SYSTEM_PRODUCT:"):
-                        system_product_name = line.split(":", 1)[1].strip()
-                        break
+                system_product_name = device_conf["system_product"]
 
                 remote_report_path = executor.init_remote_report(system_product_name, device_conf['ip'])
 
@@ -408,9 +390,8 @@ class WiFiTestOrchestrator:
                             import re
 
                             testing_day = datetime.now().strftime('%Y-%m-%d')
-                            safe_product = re.sub(r'[^\w\-]', '_', device_conf.get('system_product', 'Unknown'))
 
-                            report_subdir = ReportPaths.LOCAL_REPORTS_DIR / safe_product / testing_day
+                            report_subdir = ReportPaths.LOCAL_REPORTS_DIR / device_conf["system_product"] / testing_day
                             report_subdir.mkdir(parents=True, exist_ok=True)
 
                             local_path = executor.download_report(remote_path, str(report_subdir))

@@ -206,22 +206,24 @@ class DeviceDiscovery:
                 stdin, stdout, stderr = ssh.exec_command(cmd, timeout=5)
                 exit_status = stdout.channel.recv_exit_status()
 
-                if exit_status == 0 and stdout.read().decode().strip():
-                    return stdout.read().decode().strip()
+                if exit_status == 0:
+                    output = stdout.read().decode().strip()  # ЧИТАЕМ ОДИН РАЗ
+                    if output:
+                        return output
 
             elif os_type == "Linux":
-                try:
-                    stdin, stdout, stderr = ssh.exec_command("cat /sys/devices/virtual/dmi/id/product_name", timeout=5)
-                    exit_status = stdout.channel.recv_exit_status()
+                stdin, stdout, stderr = ssh.exec_command("cat /sys/devices/virtual/dmi/id/product_name", timeout=5)
+                exit_status = stdout.channel.recv_exit_status()
 
-                    if exit_status == 0:
-                        product = stdout.read().decode().strip()
-                        if product:
-                            return product
-                except:
-                    pass
+                if exit_status == 0:
+                    output = stdout.read().decode().strip()  # ЧИТАЕМ ОДИН РАЗ
+                    if output:
+                        return output
 
-            return platform.node() if hasattr(platform, 'node') else "Unknown"
+            # Fallback: hostname
+            stdin, stdout, stderr = ssh.exec_command("hostname", timeout=3)
+            hostname = stdout.read().decode().strip()
+            return hostname if hostname else "Unknown"
 
         except Exception as e:
             logger.debug(f"System product detection failed: {e}")
@@ -302,6 +304,9 @@ def generate_config_code(devices: List[Dict]) -> str:
     code_lines = ["# Auto-discovered devices", "DEVICES = ["]
 
     for device in devices:
+        from config import Paths
+        safe_product = Paths.sanitize_name(device.get('system_product', 'Unknown'))
+
         code_lines.append("    {")
         code_lines.append(f"        'name': '{device['name']}',")
         code_lines.append(f"        'ip': '{device['ip']}',")
@@ -309,7 +314,7 @@ def generate_config_code(devices: List[Dict]) -> str:
         code_lines.append(f"        'password': '{device['password']}',")
         code_lines.append(f"        'os': '{device['os']}',")
         code_lines.append(f"        'python_path': '{device['python_path']}',")
-        code_lines.append(f"        'system_product': '{device.get('system_product', 'Unknown')}'")  # ADD THIS
+        code_lines.append(f"        'system_product': '{safe_product}'")  # ADD THIS
         code_lines.append("    },")
 
     code_lines.append("]")

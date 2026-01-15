@@ -26,9 +26,6 @@ def main():
     # Command: forget
     cmd_forget = subparsers.add_parser("forget")
 
-    # Command: sysinfo
-    cmd_sysinfo = subparsers.add_parser("sysinfo", help="Get system product name")
-
     # Command: prevent_sleep
     cmd_prevent_sleep = subparsers.add_parser("prevent_sleep", help="Prevent system sleep/screen timeout")
 
@@ -75,11 +72,6 @@ def main():
 
         elif args.command == "forget":
             dm.forget_all_networks()
-            print("RESULT:SUCCESS")
-
-        elif args.command == "sysinfo":
-            product_name = dm.get_system_product_name()
-            print(f"SYSTEM_PRODUCT:{product_name}")
             print("RESULT:SUCCESS")
 
         elif args.command == "prevent_sleep":

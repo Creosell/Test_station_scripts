@@ -1,5 +1,6 @@
 import re
 import os
+import html
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -235,21 +236,21 @@ class ReportGenerator:
         :param device_name: Device system product name
         :param ip_address: Device IP address
         """
-        # Generate WiFi content
+
+        safe_device_name = html.escape(device_name)
+        safe_ip = html.escape(ip_address)
+
         wifi_content = self._generate_wifi_content()
 
-        # Replace template placeholders
-        html = self.template.replace('{DEVICE_NAME}', device_name)
-        html = html.replace('{IP_ADDRESS}', ip_address)
-        html = html.replace('{TIMESTAMP}', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-        html = html.replace('{WIFI_CONTENT}', wifi_content)
+        html_content = self.template.replace('{DEVICE_NAME}', safe_device_name)
+        html_content = html_content.replace('{IP_ADDRESS}', safe_ip)
+        html_content = html_content.replace('{TIMESTAMP}', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        html_content = html_content.replace('{WIFI_CONTENT}', wifi_content)
 
-        # Ensure output directory exists
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        # Write report
         with open(self.output_path, 'w', encoding='utf-8') as f:
-            f.write(html)
+            f.write(html_content)
 
         logger.info(f"Report generated: {self.output_path}")
 

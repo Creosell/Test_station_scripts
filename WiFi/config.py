@@ -1,4 +1,5 @@
 import logging
+import re
 import sys
 import os
 from pathlib import Path
@@ -34,6 +35,22 @@ class Paths:
             logging.error(f"[Config] CRITICAL: Required file not found at: {target}")
             raise FileNotFoundError(f"Missing required file: {filename}")
         return target
+
+    @staticmethod
+    def sanitize_name(name: str) -> str:
+        """
+        Sanitize device/product name for safe filesystem and command line usage.
+        Replaces spaces and special chars with underscores.
+
+        :param name: Original name
+        :return: Sanitized name safe for paths and commands
+        """
+        # Replace spaces and special chars with underscore
+        safe = re.sub(r'[^\w\-]', '_', name)
+        # Remove consecutive underscores
+        safe = re.sub(r'_+', '_', safe)
+        # Remove leading/trailing underscores
+        return safe.strip('_')
 
 
 # --- NETWORK CONFIGURATION ---
@@ -136,14 +153,14 @@ NETWORKS = {
         "password": NetworkConfig.WIFI_PASSWORD,
         "device": NetworkConfig.DEVICE_2G,
         "encryption": "psk2",
-        # "channels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
+        #"channels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
         "channels": [13]
     },
     "5G": {
         "ssid": NetworkConfig.SSID_5G,
         "password": NetworkConfig.WIFI_PASSWORD,
         "device": NetworkConfig.DEVICE_5G,
-        "encryption": "sae-mixed",
+        "encryption": "psk2",
         #"channels": [36, 40, 44, 48, 149, 153, 157, 161, 165]
         "channels": [165]
     }
