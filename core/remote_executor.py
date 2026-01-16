@@ -101,12 +101,12 @@ class RemoteDeviceExecutor:
         logger.debug(f"{self.name}: Verifying/Creating remote root directory: {self.remote_dir}")
         self._create_remote_dir(self.remote_dir)
 
-        # Core files to upload
+        # Core files to upload (local_path, remote_filename)
         core_files = [
-            "agent/agent.py",
-            "agent/agent_device_manager.py",
-            "core/config.py",
-            "core/core_report.py"
+            ("agent/agent.py", "agent.py"),
+            ("agent/agent_device_manager.py", "agent_device_manager.py"),
+            ("core/config.py", "config.py"),
+            ("core/core_report.py", "report_generator.py")
         ]
 
         # Plugin files to upload
@@ -120,27 +120,22 @@ class RemoteDeviceExecutor:
                 logger.debug(f"{self.name}: Transport session established.")
 
                 # Upload core files
-                for file in core_files:
-                    local_path = Paths.BASE_DIR / file
+                for local_rel_path, remote_filename in core_files:
+                    local_path = Paths.BASE_DIR / local_rel_path
 
                     if not local_path.exists():
-                        logger.warning(f"{self.name}: Missing file: {file}")
+                        logger.warning(f"{self.name}: Missing file: {local_rel_path}")
                         continue
 
                     file_size = local_path.stat().st_size
-                    remote_dest_path = f"{self.remote_dir}/{file}".replace("\\", "/")
-                    remote_dest_dir = Path(remote_dest_path).parent
+                    remote_dest_path = f"{self.remote_dir}/{remote_filename}".replace("\\", "/")
 
-                    self._create_remote_dir(remote_dest_dir)
-
-                    logger.debug(f"{self.name}: Uploading: {file} ({file_size} bytes)")
+                    logger.debug(f"{self.name}: Uploading: {local_rel_path} -> {remote_filename} ({file_size} bytes)")
                     scp.put(str(local_path), remote_path=remote_dest_path)
 
                 # Create plugins directory on remote
                 if plugin_files:
-                    plugins_dir_cmd = f"mkdir -p {self.remote_dir}/plugins" if self.os_type == "Linux" else \
-                                    f'powershell -Command "New-Item -Path \'{self.remote_dir}\\plugins\' -ItemType Directory -Force"'
-                    self._exec_command_verbose(plugins_dir_cmd, "Create plugins directory")
+                    self._create_remote_dir(f"{self.remote_dir}/plugins")
 
                     # Upload plugin files
                     for local_rel_path, remote_file_path in plugin_files:
