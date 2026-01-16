@@ -106,7 +106,7 @@ class RemoteDeviceExecutor:
             ("agent/agent.py", "agent.py"),
             ("agent/agent_device_manager.py", "agent_device_manager.py"),
             ("core/config.py", "config.py"),
-            ("core/core_report.py", "report_generator.py")
+            ("core/core_report.py", "core_report.py")
         ]
 
         # Plugin files to upload

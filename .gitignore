@@ -8,3 +8,4 @@
 /resources/wifi_profiles/
 /agent/slave_setup/resources/
 /.claude/settings.local.json
+/modules/wifi/discovered_devices.py

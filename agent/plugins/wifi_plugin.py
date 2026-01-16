@@ -16,12 +16,18 @@ class WifiPlugin:
     """WiFi test plugin for agent."""
 
     def __init__(self):
-        from agent.agent_device_manager import AgentDeviceManager
+        try:
+            from agent_device_manager import AgentDeviceManager
+        except ImportError:
+            from agent.agent_device_manager import AgentDeviceManager
         self.device_mgr = AgentDeviceManager()
         self.os_type = self.device_mgr.os_type
 
         # Import config after deployment
-        from core.config import NetworkConfig, Timings, Limits, Paths
+        try:
+            from config import NetworkConfig, Timings, Limits, Paths
+        except ImportError:
+            from core.config import NetworkConfig, Timings, Limits, Paths
         try:
             self.NetworkConfig = NetworkConfig
             self.Timings = Timings
@@ -120,7 +126,10 @@ class WifiPlugin:
         :return: Report file path or None
         """
         try:
-            from core.core_report import CoreReportGenerator as ReportGenerator
+            try:
+                from core_report import CoreReportGenerator as ReportGenerator
+            except ImportError:
+                from core.core_report import CoreReportGenerator as ReportGenerator
             from pathlib import Path
 
             report_path = Path(report_dir)
@@ -157,7 +166,10 @@ class WifiPlugin:
         :return: True if successful
         """
         try:
-            from core.core_report import CoreReportGenerator as ReportGenerator, IperfResult
+            try:
+                from core_report import CoreReportGenerator as ReportGenerator, IperfResult
+            except ImportError:
+                from core.core_report import CoreReportGenerator as ReportGenerator, IperfResult
             from pathlib import Path
             import base64
             import json
