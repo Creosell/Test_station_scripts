@@ -14,18 +14,14 @@ logger = setup_logging()
 class WiFiTestOrchestrator:
     """
     Orchestrates Wi-Fi performance tests across multiple devices with automatic HTML report generation.
-    Supports incremental reporting, parallel execution, and checkpoint/resume capability.
+    Supports incremental reporting, parallel execution.
     """
 
-    def __init__(self, enable_checkpoints=False):
+    def __init__(self):
         """
         Initialize orchestrator with router manager and ensure report directories exist.
-
-        :param enable_checkpoints: Enable checkpoint/resume functionality
         """
         self.router = RouterManager()
-        self.enable_checkpoints = enable_checkpoints
-        self.checkpoint_file = Path("test_checkpoint.json") if enable_checkpoints else None
 
         # Dynamically assign unique iperf ports to configured devices
         self._assign_iperf_ports()
@@ -176,72 +172,7 @@ class WiFiTestOrchestrator:
         except Exception as e:
             logger.error(f"Cleanup error: {e}")
 
-        # Clear checkpoint on successful completion
-        if self.enable_checkpoints:
-            self._clear_checkpoint()
-
         logger.info("=== All Tests Finished ===")
-
-    def _save_checkpoint(self, device_name, band, standard, channel):
-        """
-        Save test progress checkpoint to JSON file.
-
-        :param device_name: Device name being tested
-        :param band: Current band (2G/5G)
-        :param standard: Current Wi-Fi standard
-        :param channel: Current channel
-        """
-        if not self.enable_checkpoints or not self.checkpoint_file:
-            return
-
-        import json
-        checkpoint_data = {
-            'timestamp': time.time(),
-            'device': device_name,
-            'band': band,
-            'standard': standard,
-            'channel': channel
-        }
-
-        try:
-            with open(self.checkpoint_file, 'w') as f:
-                json.dump(checkpoint_data, f, indent=2)
-            logger.debug(f"Checkpoint saved: {band}/{standard}/Ch{channel}")
-        except Exception as e:
-            logger.warning(f"Failed to save checkpoint: {e}")
-
-    def _load_checkpoint(self):
-        """
-        Load test progress from checkpoint file.
-
-        :return: Checkpoint data dict or None if no checkpoint exists
-        """
-        if not self.enable_checkpoints or not self.checkpoint_file:
-            return None
-
-        if not self.checkpoint_file.exists():
-            return None
-
-        try:
-            import json
-            with open(self.checkpoint_file, 'r') as f:
-                data = json.load(f)
-            logger.info(f"Checkpoint loaded: {data['device']} @ {data['band']}/{data['standard']}/Ch{data['channel']}")
-            return data
-        except Exception as e:
-            logger.warning(f"Failed to load checkpoint: {e}")
-            return None
-
-    def _clear_checkpoint(self):
-        """
-        Remove checkpoint file on successful test completion.
-        """
-        if self.checkpoint_file and self.checkpoint_file.exists():
-            try:
-                self.checkpoint_file.unlink()
-                logger.info("Checkpoint cleared")
-            except Exception as e:
-                logger.warning(f"Failed to clear checkpoint: {e}")
 
     def run_parallel_suite(self, max_workers=None):
         """
@@ -432,7 +363,8 @@ class WiFiTestOrchestrator:
 
         return results
 
-    def _test_channel_on_all_devices(self, device_executors, remote_report_paths,
+    @staticmethod
+    def _test_channel_on_all_devices(device_executors, remote_report_paths,
                                      ssid, password, band_display, standard, channel, max_workers):
         """
         Test a single channel on all devices in parallel (synchronized).
@@ -466,10 +398,6 @@ class WiFiTestOrchestrator:
                 if not iperf_output:
                     logger.warning(f"[{device_name}] Iperf failed")
                     return False
-
-                # Save checkpoint if enabled
-                if self.enable_checkpoints:
-                    self._save_checkpoint(device_name, band_display, standard, channel)
 
                 # Add to remote report
                 remote_path = remote_report_paths.get(device_name)
@@ -613,15 +541,6 @@ class WiFiTestOrchestrator:
                 # Run iperf test
                 iperf_output = device_executor.run_iperf()
 
-                # Save checkpoint after successful test
-                if self.enable_checkpoints:
-                    self._save_checkpoint(
-                        device_executor.ip,
-                        band_name,
-                        standard,
-                        channel
-                    )
-
                 # Add result to remote report incrementally (fault-tolerant)
                 if remote_report_path and iperf_output:
                     try:
@@ -680,11 +599,9 @@ if __name__ == "__main__":
 
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description="WiFi Test Orchestrator with parallel execution and checkpoint support")
+        description="WiFi Test Orchestrator with parallel execution")
     parser.add_argument('--parallel', action='store_true',
                         help='Run tests in parallel across all devices')
-    parser.add_argument('--resume', action='store_true',
-                        help='Enable checkpoint/resume capability (saves progress)')
     parser.add_argument('--workers', type=int, default=None,
                         help='Maximum number of parallel workers (default: number of devices)')
     parser.add_argument('--auto-discover', action='store_true',
@@ -748,7 +665,7 @@ if __name__ == "__main__":
 
         logger.info(f"✓ Discovered {len(devices)} devices, proceeding with tests...")
 
-    orchestrator = WiFiTestOrchestrator(enable_checkpoints=args.resume)
+    orchestrator = WiFiTestOrchestrator()
 
     try:
         if args.parallel:

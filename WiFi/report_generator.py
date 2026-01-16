@@ -1,10 +1,9 @@
-import re
-import os
 import html
+import logging
+import re
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-import logging
+from typing import Dict, Optional
 
 logger = logging.getLogger("ReportGen")
 

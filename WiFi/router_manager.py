@@ -1,8 +1,9 @@
 # router_manager.py
-import time
 import logging
+import time
+
 import paramiko
-from tenacity import retry, stop_after_attempt, wait_fixed
+
 from config import NetworkConfig, Timings, Limits
 
 logger = logging.getLogger("RouterMgr")

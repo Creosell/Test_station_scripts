@@ -7,13 +7,12 @@ Automatically discovers test devices (DUTs) in the network by:
 3. Detecting OS type (Windows/Linux)
 4. Auto-populating device configuration
 """
-from sys import platform
 
-import paramiko
 import logging
 import socket
 from typing import List, Dict, Optional
-from pathlib import Path
+
+import paramiko
 
 logger = logging.getLogger("DeviceDiscovery")
 
