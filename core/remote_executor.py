@@ -193,12 +193,13 @@ class RemoteDeviceExecutor:
         """
         self.deploy_agent(['wifi'])
 
-    def run_plugin_command(self, plugin: str, command: str, **kwargs):
+    def run_plugin_command(self, plugin: str, command: str, timeout=None, **kwargs):
         """
         Execute plugin command via new agent.py plugin system.
 
         :param plugin: Plugin name (e.g., 'wifi')
         :param command: Command name (e.g., 'connect', 'iperf')
+        :param timeout: Execution timeout in seconds (optional)
         :param kwargs: Command arguments
         :return: Tuple of (success: bool, output: str)
         """
@@ -206,7 +207,7 @@ class RemoteDeviceExecutor:
         args_str = ' '.join([f'--{k} "{v}"' if ' ' in str(v) else f'--{k} {v}' for k, v in kwargs.items()])
         cmd_args = f"{plugin} {command} {args_str}"
 
-        return self._run_agent_command(cmd_args)
+        return self._run_agent_command(cmd_args, timeout=timeout)
 
     def _run_agent_command(self, cmd_args, timeout=None):
         """
@@ -221,7 +222,8 @@ class RemoteDeviceExecutor:
         logger.debug(f"{self.name}: Executing Agent Command: {full_cmd}")
 
         try:
-            if timeout:
+            # Optional: set keepalive to detect dead connections faster
+            if self.ssh.get_transport():
                 self.ssh.get_transport().set_keepalive(5)
 
             stdin, stdout, stderr = self.ssh.exec_command(full_cmd, timeout=timeout)
@@ -230,6 +232,12 @@ class RemoteDeviceExecutor:
             while not stdout.channel.exit_status_ready():
                 if timeout and (time.time() - start_time > timeout):
                     raise socket.timeout("Command execution timed out")
+
+                # CRITICAL FIX: Check if SSH transport is still active
+                # This prevents hanging forever if the connection drops silently
+                if not self.ssh.get_transport().is_active():
+                    raise OSError("SSH transport closed unexpectedly")
+
                 time.sleep(0.5)
 
             exit_status = stdout.channel.recv_exit_status()
@@ -237,7 +245,8 @@ class RemoteDeviceExecutor:
             err_str = stderr.read().decode().strip()
 
             if exit_status != 0:
-                logger.error(f"{self.name}: Remote Agent Error (Exit {exit_status}):\nSTDOUT: {out_str}\nSTDERR: {err_str}")
+                logger.error(
+                    f"{self.name}: Remote Agent Error (Exit {exit_status}):\nSTDOUT: {out_str}\nSTDERR: {err_str}")
                 return False, None
 
             if "RESULT:SUCCESS" in out_str:
@@ -284,14 +293,22 @@ class RemoteDeviceExecutor:
         logger.info(f"{self.name}: Connecting to {ssid}...")
 
         try:
-            success, output = self.run_plugin_command('wifi', 'connect', ssid=ssid, password=password, cleanup='true')
+            # Use explicit timeout (WIFI_SWITCH_TIMEOUT = 45s)
+            # This ensures we don't wait forever if the command succeeds but the response is lost due to network switch
+            success, output = self.run_plugin_command(
+                'wifi', 'connect',
+                timeout=self.WIFI_SWITCH_TIMEOUT,
+                ssid=ssid,
+                password=password,
+                cleanup='true'
+            )
 
             if success:
                 logger.info(f"{self.name}: Connected to {ssid}")
                 return True
 
         except Exception as e:
-            logger.info(f"{self.name}: SSH dropped during WiFi switch. Waiting for recovery...")
+            logger.info(f"{self.name}: SSH dropped during WiFi switch (Expected). Waiting for recovery...")
 
         return self._wait_for_reconnection()
 
