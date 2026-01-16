@@ -5,7 +5,8 @@ import socket
 import logging
 from scp import SCPClient
 from pathlib import Path
-from config import Paths, Timings
+from typing import List
+from core.config import Paths, Timings
 
 logger = logging.getLogger("RemoteExec")
 
@@ -13,7 +14,7 @@ logger = logging.getLogger("RemoteExec")
 class RemoteDeviceExecutor:
     """
     Manages remote execution of test agents on Device Under Test (DUT).
-    Handles SSH connection, script deployment, and command execution.
+    Handles SSH connection, script deployment, and plugin-based command execution.
     """
 
     # Constants for internal logic
@@ -37,16 +38,22 @@ class RemoteDeviceExecutor:
 
         self.ssh = None
         self.remote_dir = Paths.REMOTE_WINDOWS_WORK_DIR if self.os_type == "Windows" else Paths.REMOTE_LINUX_WORK_DIR
+        self.deployed_plugins = []  # Track deployed plugins
 
-    def connect(self):
+    def connect(self, plugins: List[str] = None):
         """
         Establish SSH connection to DUT and deploy test scripts.
+
+        :param plugins: List of plugin names to deploy (e.g., ['wifi'])
         """
+        if plugins is None:
+            plugins = ['wifi']  # Default to wifi for backward compatibility
+
         logger.info(f"{self.name}: Connecting to DUT {self.ip}...")
         self.ssh = paramiko.SSHClient()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.ssh.connect(self.ip, username=self.user, password=self.password, timeout=Timings.SSH_TIMEOUT)
-        self._deploy_scripts()
+        self.deploy_agent(plugins)
 
     def close(self):
         """
@@ -82,84 +89,87 @@ class RemoteDeviceExecutor:
 
         return exit_status, out_str, err_str
 
-    def _deploy_scripts(self):
+    def deploy_agent(self, plugins: List[str]):
         """
-        Deploy test scripts and resources to remote device via SCP.
-        Manually handles directory structures to avoid SCP recursive limitations on Windows.
-        """
-        logger.info(f"{self.name}: Initiating deployment sequence to target: {self.remote_dir}")
+        Deploy universal agent with specified plugins.
 
-        # Debug info
-        if self.os_type == "Windows":
-            self._exec_command_verbose("whoami", "Check remote user identity")
+        :param plugins: List of plugin names (e.g., ['wifi'])
+        """
+        logger.info(f"{self.name}: Deploying agent with plugins: {plugins}")
 
         # Create remote root directory
         logger.debug(f"{self.name}: Verifying/Creating remote root directory: {self.remote_dir}")
+        self._create_remote_dir(self.remote_dir)
 
-        # Abstraction for directory creation
-        if self.os_type == "Linux":
-            create_cmd = f"mkdir -p {self.remote_dir}"
-        else:
-            create_cmd = f'powershell -Command "New-Item -Path \'{self.remote_dir}\' -ItemType Directory -Force"'
-
-        exit_status, out, err = self._exec_command_verbose(create_cmd, "Create Remote Root Dir")
-        if exit_status != 0:
-            logger.error(f"{self.name}: Root creation failed: {err}")
-            raise RuntimeError(f"Mkdir failed: {err}")  # Changed Exception to RuntimeError
-
-        # Files to upload (Core Scripts)
-        files_to_sync = [
-            "config.py",
-            "device_manager.py",
-            "agent.py",
-            "report_generator.py"
+        # Core files to upload
+        core_files = [
+            "agent/agent.py",
+            "agent/agent_device_manager.py",
+            "core/config.py",
+            "core/core_report.py"
         ]
+
+        # Plugin files to upload
+        plugin_files = []
+        for plugin_name in plugins:
+            plugin_files.append((f"agent/plugins/{plugin_name}_plugin.py", f"plugins/{plugin_name}_plugin.py"))
 
         # Execute transfer
         try:
             with SCPClient(self.ssh.get_transport()) as scp:
                 logger.debug(f"{self.name}: Transport session established.")
 
-                # Upload core scripts
-                for filename in files_to_sync:
-                    local_path = Paths.get_validated_path(filename)
+                # Upload core files
+                for file in core_files:
+                    local_path = Paths.BASE_DIR / file
+
                     if not local_path.exists():
-                        logger.warning(f"{self.name}: Missing file: {filename}")
+                        logger.warning(f"{self.name}: Missing file: {file}")
                         continue
 
-                    file_size = local_path.stat().st_size  # Use pathlib
+                    file_size = local_path.stat().st_size
+                    remote_dest_path = f"{self.remote_dir}/{file}".replace("\\", "/")
+                    remote_dest_dir = Path(remote_dest_path).parent
 
-                    # Force forward slashes for SCP compatibility regardless of OS
-                    remote_dest_path = f"{self.remote_dir}/{filename}".replace("\\", "/")
+                    self._create_remote_dir(remote_dest_dir)
 
-                    logger.debug(f"{self.name}: Uploading: {filename} ({file_size} bytes)")
+                    logger.debug(f"{self.name}: Uploading: {file} ({file_size} bytes)")
                     scp.put(str(local_path), remote_path=remote_dest_path)
+
+                # Create plugins directory on remote
+                if plugin_files:
+                    plugins_dir_cmd = f"mkdir -p {self.remote_dir}/plugins" if self.os_type == "Linux" else \
+                                    f'powershell -Command "New-Item -Path \'{self.remote_dir}\\plugins\' -ItemType Directory -Force"'
+                    self._exec_command_verbose(plugins_dir_cmd, "Create plugins directory")
+
+                    # Upload plugin files
+                    for local_rel_path, remote_file_path in plugin_files:
+                        local_path = Paths.BASE_DIR / local_rel_path
+
+                        if not local_path.exists():
+                            logger.warning(f"{self.name}: Missing plugin: {local_rel_path}")
+                            continue
+
+                        file_size = local_path.stat().st_size
+                        remote_dest_path = f"{self.remote_dir}/{remote_file_path}".replace("\\", "/")
+
+                        logger.debug(f"{self.name}: Uploading plugin: {local_rel_path} ({file_size} bytes)")
+                        scp.put(str(local_path), remote_path=remote_dest_path)
 
                 # Upload resources folder (manual recursion)
                 if Paths.RESOURCES_DIR.exists():
-                    logger.info("-" * 50)
-                    logger.debug(f"{self.name}: Starting manual resource transfer...")
+                    logger.debug(f"{self.name}: Starting resource transfer...")
 
-                    # Base remote resources directory
                     remote_res_dir = f"{self.remote_dir}/resources".replace("\\", "/")
-
-                    # Track created directories to avoid redundant SSH calls
                     created_remote_dirs = set()
 
-                    # Walk through local files and upload individually
                     for root, _, files in os.walk(str(Paths.RESOURCES_DIR)):
                         for file in files:
                             local_file_path = Path(root) / file
-                            # Calculate relative path to keep structure
                             rel_path = local_file_path.relative_to(Paths.RESOURCES_DIR)
-
-                            # Construct full remote path
                             remote_file_path = f"{remote_res_dir}/{rel_path.as_posix()}"
-
-                            # Determine remote parent directory for the current file
                             remote_parent_dir = str(Path(remote_file_path).parent).replace("\\", "/")
 
-                            # Ensure the parent directory exists remotely (if not already created)
                             if remote_parent_dir not in created_remote_dirs:
                                 if self.os_type == "Linux":
                                     dir_cmd = f"mkdir -p {remote_parent_dir}"
@@ -173,22 +183,41 @@ class RemoteDeviceExecutor:
                             scp.put(str(local_file_path), remote_path=remote_file_path)
 
                     logger.debug(f"{self.name}: Resource transfer completed.")
-                else:
-                    logger.warning(f"{self.name}: No resources directory found.")
 
+            self.deployed_plugins = plugins
             logger.info(f"{self.name}: Deployment sequence finished successfully.")
-            logger.info("-" * 50)
 
         except Exception as e:
             logger.error(f"{self.name}: Critical SCP Transfer failed: {e}")
             raise
+
+    def _deploy_scripts(self):
+        """
+        Legacy deployment method for backward compatibility.
+        Deploys WiFi plugin by default.
+        """
+        self.deploy_agent(['wifi'])
+
+    def run_plugin_command(self, plugin: str, command: str, **kwargs):
+        """
+        Execute plugin command via new agent.py plugin system.
+
+        :param plugin: Plugin name (e.g., 'wifi')
+        :param command: Command name (e.g., 'connect', 'iperf')
+        :param kwargs: Command arguments
+        :return: Tuple of (success: bool, output: str)
+        """
+        # Build args string
+        args_str = ' '.join([f'--{k} "{v}"' if ' ' in str(v) else f'--{k} {v}' for k, v in kwargs.items()])
+        cmd_args = f"{plugin} {command} {args_str}"
+
+        return self._run_agent_command(cmd_args)
 
     def _run_agent_command(self, cmd_args, timeout=None):
         """
         Execute agent.py command on remote device (private method).
         Uses polling to avoid blocking indefinitely on dead SSH links.
         """
-        # Force CMD logic for Windows execution to support && and cd /d
         if self.os_type == "Windows":
             full_cmd = f'cmd /c "cd /d {self.remote_dir} && {self.python_cmd} agent.py {cmd_args}"'
         else:
@@ -197,19 +226,16 @@ class RemoteDeviceExecutor:
         logger.debug(f"{self.name}: Executing Agent Command: {full_cmd}")
 
         try:
-            # Set transport timeout explicitly
             if timeout:
                 self.ssh.get_transport().set_keepalive(5)
 
             stdin, stdout, stderr = self.ssh.exec_command(full_cmd, timeout=timeout)
 
-            # NON-BLOCKING WAIT LOOP
-            # Solves the "hang" issue when WiFi switches and drops link
             start_time = time.time()
             while not stdout.channel.exit_status_ready():
                 if timeout and (time.time() - start_time > timeout):
                     raise socket.timeout("Command execution timed out")
-                time.sleep(0.5)  # Short sleep allows catching CTRL+C
+                time.sleep(0.5)
 
             exit_status = stdout.channel.recv_exit_status()
             out_str = stdout.read().decode().strip()
@@ -226,19 +252,18 @@ class RemoteDeviceExecutor:
                 return False, out_str
 
         except socket.timeout:
-            logger.warning(f"{self.name}: Agent command timed out after {timeout}s (Expected behavior during WiFi switch)")
+            logger.warning(f"{self.name}: Agent command timed out after {timeout}s")
             return False, None
         except Exception as e:
-            # Let caller handle connection drops (e.g. for WiFi switching)
             logger.debug(f"{self.name}: Command execution interrupted: {e}")
             raise
 
     def run_agent_command(self, cmd_args, timeout=None):
         """
-        Execute agent.py command on remote device (public method).
+        Execute agent.py command on remote device (public method for backward compatibility).
 
         :param cmd_args: Arguments to pass to agent.py
-        :param timeout: Optional timeout in seconds for command execution
+        :param timeout: Optional timeout in seconds
         :return: Tuple of (stdout: str, stderr: str)
         """
         success, output = self._run_agent_command(cmd_args, timeout)
@@ -249,67 +274,51 @@ class RemoteDeviceExecutor:
             return output or "", ""
 
     def forget_all_networks(self):
-        """
-        Remove all WiFi network profiles on remote device.
-        """
+        """Remove all WiFi network profiles on remote device."""
         logger.info(f"{self.name}: Forgetting networks...")
-        self._run_agent_command("forget")
+        self.run_plugin_command('wifi', 'forget')
 
     def connect_wifi(self, ssid, password):
         """
-        Connect remote device to specified WiFi network with cleanup.
-
-        IMPORTANT: This command may cause SSH disconnection when switching networks.
-        The method handles reconnection automatically via polling.
+        Connect remote device to specified WiFi network.
 
         :param ssid: Target network SSID
         :param password: Network password
-        :return: True if connection successful, False otherwise
+        :return: True if connection successful
         """
-        logger.info(f"{self.name}: Transitioning to {ssid} (with cleanup)...")
-
-        # Build command with cleanup flag
-        cmd = f"connect --ssid {ssid} --password {password} --cleanup"
+        logger.info(f"{self.name}: Connecting to {ssid}...")
 
         try:
-            # Execute with generous timeout defined in constants
-            success, output = self._run_agent_command(cmd, timeout=self.WIFI_SWITCH_TIMEOUT)
+            success, output = self.run_plugin_command('wifi', 'connect', ssid=ssid, password=password, cleanup='true')
 
-            # If command returned result without link drop (rare but possible)
             if success:
-                logger.info(f"{self.name}: Connected to {ssid} (Link maintained)")
+                logger.info(f"{self.name}: Connected to {ssid}")
                 return True
 
         except Exception as e:
-            # This is NORMAL behavior when switching WiFi networks
-            logger.info(f"{self.name}: SSH connection dropped as expected during WiFi switch ({e}). Waiting for device recovery...")
+            logger.info(f"{self.name}: SSH dropped during WiFi switch. Waiting for recovery...")
 
-        # If we reach here, link was dropped. Begin polling (waiting) for recovery.
         return self._wait_for_reconnection()
 
     def _wait_for_reconnection(self):
         """
-        Poll the device via SSH until it becomes available again.
-        Used after WiFi network switches that break SSH connection.
+        Poll device via SSH until available again.
 
-        :return: True if device reconnected, False if timeout
+        :return: True if reconnected, False if timeout
         """
         logger.info(f"{self.name}: Polling device availability...")
         start_time = time.time()
 
         while time.time() - start_time < self.POLLING_TIMEOUT:
             try:
-                # Attempt to recreate SSH connection
                 if self.ssh:
                     self.ssh.close()
 
                 self.ssh = paramiko.SSHClient()
                 self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-                # Short timeout for connectivity check
                 self.ssh.connect(self.ip, username=self.user, password=self.password, timeout=5)
 
-                logger.info(f"{self.name}: Device is back online! Verifying agent status...")
+                logger.info(f"{self.name}: Device is back online!")
                 return True
             except (socket.error, paramiko.SSHException):
                 time.sleep(self.POLLING_INTERVAL)
@@ -321,42 +330,52 @@ class RemoteDeviceExecutor:
         logger.error(f"{self.name}: Timed out waiting for device to reconnect.")
         return False
 
+    def _create_remote_dir(self, path):
+        if self.os_type == "Linux":
+            create_cmd = f"mkdir -p {path}"
+        else:
+            create_cmd = f'powershell -Command "New-Item -Path \'{path}\' -ItemType Directory -Force"'
+
+        exit_status, out, err = self._exec_command_verbose(create_cmd, f"{self.name}: Created Remote dir - {path}")
+        if exit_status != 0:
+            logger.error(f"{self.name}: Directory {path} creation failed. Error: {err}")
+            raise RuntimeError(f"{self.name}: Mkdir failed for {path}. Error: {err}")
+
     def run_iperf(self):
         """
-        Execute iperf3 test on remote device and return raw output.
+        Execute iperf3 test on remote device.
 
-        :return: Raw iperf output string or None if test failed
+        :return: Raw iperf output string or None
         """
-        # Retrieve the dynamically assigned port
         port = self.config.get('iperf_port', 5201)
         logger.info(f"{self.name}: Running iperf on port {port}...")
 
-
-        logger.debug(f"{self.name}: Running iperf on port {port}...")
-        success, output = self._run_agent_command(f"iperf --port {port}")
+        success, output = self.run_plugin_command('wifi', 'iperf', port=port)
         if success and "IPERF_OUTPUT_START" in output:
             try:
                 start = output.find("IPERF_OUTPUT_START") + len("IPERF_OUTPUT_START")
                 end = output.find("IPERF_OUTPUT_END")
                 iperf_log = output[start:end].strip()
-                logger.info(f"{self.name}: Iperf Result:\n{iperf_log}")
+                logger.info(f"{self.name}: Iperf completed")
                 return iperf_log
             except Exception:
-                logger.error(f"{self.name}: Failed to parse Iperf output markers")
+                logger.error(f"{self.name}: Failed to parse iperf output")
         return None
 
     def init_remote_report(self, device_name, ip_address):
         """
-        Initialize HTML report on DUT for incremental updates.
+        Initialize HTML report on DUT.
 
         :param device_name: System product name
         :param ip_address: Device IP address
-        :return: Remote report path or None if failed
+        :return: Remote report path or None
         """
         report_dir = Paths.REMOTE_WINDOWS_WORK_DIR + "\\reports" if self.os_type == "Windows" else Paths.REMOTE_LINUX_WORK_DIR + "/reports"
 
-        cmd = f'init_report --device_name "{device_name}" --ip_address {ip_address} --report_dir "{report_dir}"'
-        success, output = self._run_agent_command(cmd)
+        success, output = self.run_plugin_command('wifi', 'init_report',
+                                                   device_name=device_name,
+                                                   ip_address=ip_address,
+                                                   report_dir=report_dir)
 
         if success and "REPORT_PATH:" in output:
             for line in output.split('\n'):
@@ -370,7 +389,7 @@ class RemoteDeviceExecutor:
 
     def add_remote_test_result(self, report_path, band, ssid, standard, channel, iperf_output):
         """
-        Add test result to remote HTML report (incremental update).
+        Add test result to remote HTML report.
 
         :param report_path: Remote path to report file
         :param band: Frequency band
@@ -378,29 +397,33 @@ class RemoteDeviceExecutor:
         :param standard: WiFi standard
         :param channel: Channel number
         :param iperf_output: Raw iperf output
-        :return: True if successful, False otherwise
+        :return: True if successful
         """
-        # Escape iperf output for command line (base64 encode)
         import base64
         iperf_b64 = base64.b64encode(iperf_output.encode()).decode()
 
-        cmd = f'add_result --report_path "{report_path}" --band "{band}" --ssid "{ssid}" --standard "{standard}" --channel {channel} --iperf_output "{iperf_b64}"'
-        success, output = self._run_agent_command(cmd, timeout=10)
+        success, output = self.run_plugin_command('wifi', 'add_result',
+                                                   report_path=report_path,
+                                                   band=band,
+                                                   ssid=ssid,
+                                                   standard=standard,
+                                                   channel=channel,
+                                                   iperf_output=iperf_b64)
 
         if success:
-            logger.info(f"{self.name}: Test result added to remote report: {band}/{standard}/Ch{channel}")
+            logger.info(f"{self.name}: Test result added: {band}/{standard}/Ch{channel}")
             return True
         else:
-            logger.warning(f"{self.name}: Failed to add result to remote report")
+            logger.warning(f"{self.name}: Failed to add result to report")
             return False
 
     def download_report(self, remote_path, local_dir):
         """
-        Download HTML report from DUT to local machine.
+        Download HTML report from DUT.
 
         :param remote_path: Remote path to report file
         :param local_dir: Local directory to save report
-        :return: Local file path or None if failed
+        :return: Local file path or None
         """
         try:
             from pathlib import Path
@@ -414,3 +437,4 @@ class RemoteDeviceExecutor:
         except Exception as e:
             logger.error(f"{self.name}: Failed to download report: {e}")
             return None
+

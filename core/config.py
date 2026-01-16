@@ -10,7 +10,7 @@ class Paths:
     Centralized path configuration using pathlib for robust cross-platform resolution.
     """
     # Absolute path to the directory containing this script
-    BASE_DIR = Path(__file__).resolve().parent
+    BASE_DIR = Path(__file__).resolve().parent.parent
 
     RESOURCES_DIR = BASE_DIR / "resources"
     PROFILES_DIR = RESOURCES_DIR / "wifi_profiles"
@@ -67,7 +67,6 @@ class NetworkConfig:
     DEVICE_2G = "mt798111"
     DEVICE_5G = "mt798112"
 
-
     # Pool of ports available for parallel testing (5201-5221)
     IPERF_PORTS = list(range(5201, 5222))
 
@@ -104,10 +103,10 @@ class ReportPaths:
     Paths for HTML report generation and collection.
     """
     # Local reports directory (orchestrator machine)
-    LOCAL_REPORTS_DIR = Path(__file__).parent / "reports"
+    LOCAL_REPORTS_DIR = Path(__file__).parent.parent / "reports"
 
     # Report template location
-    REPORT_TEMPLATE = Path(__file__).parent / "resources" / "report_template.html"
+    REPORT_TEMPLATE = Path(__file__).parent.parent / "resources" / "report_template.html"
 
     # Remote report directory (on DUT)
     REMOTE_REPORT_DIR = "C:\\Temp\\wifi_test_agent\\reports"  # Windows
@@ -138,33 +137,6 @@ class Limits:
     WIFI_CONNECT_RETRIES = 3
     MAX_CHECK_ATTEMPTS = 15
     CONNECTION_RETRY_DELAY = 5
-
-
-# --- WIFI CONFIGURATION ---
-ENCRYPTIONS = ["psk", "psk2", "psk-mixed", "sae", "sae-mixed"]
-WIFI_STANDARDS_2G = ["11b/g/n","11n/ax"]
-WIFI_STANDARDS_5G = ["11a/n/ac", "11ac/ax"]
-WIFI_STANDARDS_2G = ["11b/g/n"]
-WIFI_STANDARDS_5G = ["11a/n/ac"]
-
-NETWORKS = {
-    "2G": {
-        "ssid": NetworkConfig.SSID_2G,
-        "password": NetworkConfig.WIFI_PASSWORD,
-        "device": NetworkConfig.DEVICE_2G,
-        "encryption": "psk2",
-        #"channels": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]
-        "channels": [13]
-    },
-    "5G": {
-        "ssid": NetworkConfig.SSID_5G,
-        "password": NetworkConfig.WIFI_PASSWORD,
-        "device": NetworkConfig.DEVICE_5G,
-        "encryption": "psk2",
-        #"channels": [36, 40, 44, 48, 149, 153, 157, 161, 165]
-        "channels": [165]
-    }
-}
 
 
 # --- LOGGING SYSTEM ---

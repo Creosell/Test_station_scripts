@@ -1,3 +1,8 @@
+"""
+Unified report generator for all test modules.
+Supports modular sections (WiFi, Bluetooth, etc.) in a single HTML report.
+"""
+
 import html
 import logging
 import re
@@ -5,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
-logger = logging.getLogger("ReportGen")
+logger = logging.getLogger("CoreReport")
 
 
 class IperfResult:
@@ -20,8 +25,7 @@ class IperfResult:
         '11a':  {'excellent': 22,  'good': 18},
         '11ac': {'excellent': 450, 'good': 300},
         '11ax': {'excellent': 120, 'good': 80},
-    }# depends on band
-
+    }
 
     def __init__(self, bandwidth: float):
         """
@@ -48,21 +52,30 @@ class IperfResult:
             return "speed-poor"
 
 
-class ReportGenerator:
+class CoreReportGenerator:
     """
-    Generates HTML test reports from template and test results.
+    Unified report generator for all test modules.
+    Maintains separate sections for different test types.
     """
 
-    def __init__(self, template_path: Path, output_path: Path):
+    def __init__(self, template_path: Path = None, output_path: Path = None):
         """
         Initialize report generator.
 
-        :param template_path: Path to HTML template file
-        :param output_path: Path where report will be saved
+        :param template_path: Path to HTML template file (optional, uses default if None)
+        :param output_path: Path where report will be saved (optional)
         """
+        # Use default template from WiFi resources if not specified
+        if template_path is None:
+            from core.config import ReportPaths
+            template_path = ReportPaths.REPORT_TEMPLATE
+
         self.template_path = template_path
         self.output_path = output_path
+
+        # Module-specific results storage
         self.wifi_results: Dict[str, Dict] = {}  # {band: {ssid, tests: []}}
+        # Future: self.bluetooth_results, self.ethernet_results, etc.
 
         # Load template
         if not template_path.exists():
@@ -228,13 +241,16 @@ class ReportGenerator:
         else:
             return "speed-poor"
 
-    def generate(self, device_name: str, ip_address: str) -> None:
+    def generate(self, device_name: str = None, ip_address: str = None) -> None:
         """
         Generate final HTML report and save to file.
 
-        :param device_name: Device system product name
-        :param ip_address: Device IP address
+        :param device_name: Device system product name (optional)
+        :param ip_address: Device IP address (optional)
         """
+        # Use defaults if not provided
+        device_name = device_name or "Unknown Device"
+        ip_address = ip_address or "0.0.0.0"
 
         safe_device_name = html.escape(device_name)
         safe_ip = html.escape(ip_address)
@@ -245,6 +261,12 @@ class ReportGenerator:
         html_content = html_content.replace('{IP_ADDRESS}', safe_ip)
         html_content = html_content.replace('{TIMESTAMP}', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         html_content = html_content.replace('{WIFI_CONTENT}', wifi_content)
+
+        # If output path not set, generate default
+        if not self.output_path:
+            from core.config import ReportPaths
+            filename = self.generate_report_filename(device_name, ip_address)
+            self.output_path = ReportPaths.LOCAL_REPORTS_DIR / filename
 
         self.output_path.parent.mkdir(parents=True, exist_ok=True)
 

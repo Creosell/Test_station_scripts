@@ -2,32 +2,29 @@
 import time
 from pathlib import Path
 
-from config import (setup_logging, NETWORKS, WIFI_STANDARDS_2G, WIFI_STANDARDS_5G,
-                    Timings, Limits, DUTConfig, ReportPaths, NetworkConfig)
-from remote_executor import RemoteDeviceExecutor
-from router_manager import RouterManager
+from core.config import (setup_logging, Timings, Limits, DUTConfig, ReportPaths, NetworkConfig)
+from core.remote_executor import RemoteDeviceExecutor
+from core.core_orchestrator import CoreOrchestrator
+from modules.wifi.wifi_config import NETWORKS, WIFI_STANDARDS_2G, WIFI_STANDARDS_5G, WIFI_MODES_2G, WIFI_MODES_5G
 
 # Initialize logging
 logger = setup_logging()
 
 
-class WiFiTestOrchestrator:
+class WiFiTestOrchestrator(CoreOrchestrator):
     """
     Orchestrates Wi-Fi performance tests across multiple devices with automatic HTML report generation.
     Supports incremental reporting, parallel execution.
     """
 
-    def __init__(self):
+    def __init__(self, report_generator=None):
         """
         Initialize orchestrator with router manager and ensure report directories exist.
         """
-        self.router = RouterManager()
+        super().__init__(report_generator)
 
         # Dynamically assign unique iperf ports to configured devices
         self._assign_iperf_ports()
-
-        # Ensure local reports directory exists
-        ReportPaths.LOCAL_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
     @staticmethod
     def _assign_iperf_ports():
@@ -66,7 +63,7 @@ class WiFiTestOrchestrator:
 
                 # Prevent sleep on DUT during testing
                 try:
-                    executor.run_agent_command("prevent_sleep")
+                    executor.run_plugin_command('wifi', 'prevent_sleep')
                     logger.info("Sleep prevention enabled on DUT")
                 except Exception as e:
                     logger.warning(f"Could not prevent sleep: {e}")
@@ -86,7 +83,7 @@ class WiFiTestOrchestrator:
                 # Re-enable sleep on DUT
                 if executor:
                     try:
-                        executor.run_agent_command("allow_sleep")
+                        executor.run_plugin_command('wifi', 'allow_sleep')
                         logger.info("Sleep prevention disabled on DUT")
                     except:
                         pass
@@ -97,6 +94,7 @@ class WiFiTestOrchestrator:
                         pass
 
         self._cleanup()
+        return {}  # Return empty dict for compatibility
 
     def run_device_tests(self, device_executor, device_conf):
         """
@@ -205,7 +203,7 @@ class WiFiTestOrchestrator:
 
                 # Prevent sleep
                 try:
-                    executor.run_agent_command("prevent_sleep")
+                    executor.run_plugin_command('wifi', 'prevent_sleep')
                     logger.info(f"[{device_name}] Sleep prevention enabled")
                 except Exception as e:
                     logger.warning(f"[{device_name}] Could not prevent sleep: {e}")
@@ -248,7 +246,9 @@ class WiFiTestOrchestrator:
                     logger.info(f"Testing Standard: {standard}")
 
                     try:
-                        self.router.change_standard(net_config["device"], standard)
+                        # Get mode config from wifi_config
+                        mode_config = WIFI_MODES_2G[standard] if band_key == "2G" else WIFI_MODES_5G[standard]
+                        self.router.change_standard(net_config["device"], standard, mode_config)
                     except Exception as e:
                         logger.error(f"Failed to set standard {standard}: {e}")
                         continue
@@ -338,7 +338,7 @@ class WiFiTestOrchestrator:
 
                     # Re-enable sleep
                     # try:
-                    #     executor.run_agent_command("allow_sleep")
+                    #     executor.run_plugin_command('wifi', 'allow_sleep')
                     # except:
                     #     pass
 
@@ -471,7 +471,7 @@ class WiFiTestOrchestrator:
         # Try to restore sleep settings on DUT
         if executor:
             try:
-                executor.run_agent_command("allow_sleep")
+                executor.run_plugin_command('wifi', 'allow_sleep')
             except:
                 pass
 
@@ -517,7 +517,9 @@ class WiFiTestOrchestrator:
             logger.info(f"Testing Standard: {standard}")
 
             try:
-                self.router.change_standard(net_config["device"], standard)
+                # Get mode config from wifi_config
+                mode_config = WIFI_MODES_2G[standard] if band_name == "2G" else WIFI_MODES_5G[standard]
+                self.router.change_standard(net_config["device"], standard, mode_config)
             except Exception as e:
                 logger.error(f"Failed to set standard {standard}: {e}")
                 continue
@@ -616,15 +618,14 @@ if __name__ == "__main__":
 
     # Auto-discover devices if requested
     if args.auto_discover:
-        from device_discovery import DeviceDiscovery, save_discovered_config
+        from core.device_discovery import DeviceDiscovery, save_discovered_config
+        from core.config import RouterConfig
         import socket
 
         logger.info("Auto-discovery mode enabled")
 
         # Get router config from existing config
         try:
-            from config import RouterConfig
-
             router_config = {
                 'ip': RouterConfig.IP,
                 'user': RouterConfig.USER,

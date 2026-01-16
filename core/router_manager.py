@@ -4,59 +4,10 @@ import time
 
 import paramiko
 
-from config import NetworkConfig, Timings, Limits
+from core.config import NetworkConfig, Timings, Limits
 
 logger = logging.getLogger("RouterMgr")
 
-# WiFi mode mappings based on GUI settings
-WIFI_MODES_2G = {
-    "11b/g/n": {
-        "hwmode": "11g",
-        "htmode": "HT40",
-        "legacy_rates": "1"
-    },
-    "11b/g/n/ax": {
-        "hwmode": "11g",
-        "htmode": "HE40",
-        "legacy_rates": "1"
-    },
-    "11g/n/ax": {
-        "hwmode": "11g",
-        "htmode": "HE40",
-        "legacy_rates": "0"
-    },
-    "11n/ax": {
-        "hwmode": "11g",
-        "htmode": "HE40",
-        "legacy_rates": "0",
-        "require_mode": "n"
-    }
-}
-
-WIFI_MODES_5G = {
-    "11a/n/ac/ax": {
-        "hwmode": "11a",
-        "htmode": "HE80",
-        "legacy_rates": "0"
-    },
-    "11a/n/ac": {
-        "hwmode": "11a",
-        "htmode": "VHT80",
-        "legacy_rates": "0"
-    },
-    "11n/ac/ax": {
-        "hwmode": "11a",
-        "htmode": "HE80",
-        "legacy_rates": "0",
-        "require_mode": "n"
-    },
-    "11ac/ax": {
-        "hwmode": "11a",
-        "htmode": "HE80",
-        "legacy_rates": "0",
-        "require_mode": "ac"
-    }
-}
 
 class RouterManager:
     """
@@ -215,35 +166,28 @@ class RouterManager:
                 time.sleep(1)
         return False
 
-    def change_standard(self, device, mode):
+    def change_standard(self, device, mode, mode_config):
         """
         Changes the WiFi mode (standard) for a device.
 
         Args:
             device: Device identifier (e.g., 'mt798111' for 2.4GHz, 'mt798112' for 5GHz)
-            mode: WiFi mode string (e.g., '11b/g/n', '11a/n/ac/ax')
+            mode: WiFi mode string (e.g., '11b/g/n', '11a/n/ac/ax') - for logging
+            mode_config: Mode configuration dict with hwmode, htmode, legacy_rates, etc.
 
         Raises:
-            ValueError: If mode is not supported for the device band
             Exception: If mode verification fails
         """
         self._ensure_connection()
 
-        band = "2g" if device == NetworkConfig.DEVICE_2G else "5g"
-        mode_map = WIFI_MODES_2G if band == "2g" else WIFI_MODES_5G
-
-        if mode not in mode_map:
-            raise ValueError(f"Unsupported mode '{mode}' for {band} band")
-
-        config = mode_map[mode]
         commands = [
-            f"uci set wireless.{device}.hwmode={config['hwmode']}",
-            f"uci set wireless.{device}.htmode={config['htmode']}",
-            f"uci set wireless.{device}.legacy_rates={config['legacy_rates']}"
+            f"uci set wireless.{device}.hwmode={mode_config['hwmode']}",
+            f"uci set wireless.{device}.htmode={mode_config['htmode']}",
+            f"uci set wireless.{device}.legacy_rates={mode_config['legacy_rates']}"
         ]
 
-        if "require_mode" in config:
-            commands.append(f"uci set wireless.{device}.require_mode={config['require_mode']}")
+        if "require_mode" in mode_config:
+            commands.append(f"uci set wireless.{device}.require_mode={mode_config['require_mode']}")
         else:
             commands.append(f"uci delete wireless.{device}.require_mode")
 
@@ -251,7 +195,7 @@ class RouterManager:
 
         self._exec_uci(commands, f"Setting mode for {device} to {mode}")
 
-        if not self._verify_setting(device, "htmode", config["htmode"]):
+        if not self._verify_setting(device, "htmode", mode_config["htmode"]):
             raise Exception(f"Failed to apply mode {mode}: htmode verification failed")
 
     def set_channel_auto(self):
@@ -276,7 +220,11 @@ class RouterManager:
             self._ensure_connection()
             logger.info("Resetting modes to default")
 
-            self.change_standard(NetworkConfig.DEVICE_2G, "11b/g/n/ax")
-            self.change_standard(NetworkConfig.DEVICE_5G, "11a/n/ac/ax")
+            # Default mode configs for maximum compatibility
+            default_2g_config = {"hwmode": "11g", "htmode": "HE40", "legacy_rates": "1"}
+            default_5g_config = {"hwmode": "11a", "htmode": "HE80", "legacy_rates": "0"}
+
+            self.change_standard(NetworkConfig.DEVICE_2G, "11b/g/n/ax", default_2g_config)
+            self.change_standard(NetworkConfig.DEVICE_5G, "11a/n/ac/ax", default_5g_config)
         except Exception as e:
             logger.error(f"Error resetting modes: {e}")

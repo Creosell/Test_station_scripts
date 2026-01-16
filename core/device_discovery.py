@@ -306,7 +306,7 @@ def generate_config_code(devices: List[Dict]) -> str:
     code_lines = ["# Auto-discovered devices", "DEVICES = ["]
 
     for device in devices:
-        from config import Paths
+        from core.config import Paths
         safe_product = Paths.sanitize_name(device.get('system_product', 'Unknown'))
 
         code_lines.append("    {")

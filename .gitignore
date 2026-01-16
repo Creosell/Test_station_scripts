@@ -4,3 +4,7 @@
 /CLAUDE.md
 /WiFi/slave_setup/resources/
 /WiFi/reports/
+/reports/
+/resources/wifi_profiles/
+/agent/slave_setup/resources/
+/.claude/settings.local.json
