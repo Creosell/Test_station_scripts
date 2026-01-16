@@ -192,7 +192,8 @@ class DeviceDiscovery:
                 ssh.close()
             return None
 
-    def _detect_system_product(self, ssh: paramiko.SSHClient, os_type: str) -> str:
+    @staticmethod
+    def _detect_system_product(ssh: paramiko.SSHClient, os_type: str) -> str:
         """
         Detect system product name on remote device.
 
@@ -229,7 +230,8 @@ class DeviceDiscovery:
             logger.debug(f"System product detection failed: {e}")
             return "Unknown"
 
-    def _detect_os_type(self, ssh: paramiko.SSHClient) -> Optional[str]:
+    @staticmethod
+    def _detect_os_type(ssh: paramiko.SSHClient) -> Optional[str]:
         """
         Detect OS type via SSH command execution.
 
@@ -261,7 +263,8 @@ class DeviceDiscovery:
             logger.debug(f"OS detection failed: {e}")
             return None
 
-    def _detect_python_path(self, ssh: paramiko.SSHClient, os_type: str) -> str:
+    @staticmethod
+    def _detect_python_path(ssh: paramiko.SSHClient, os_type: str) -> str:
         """
         Detect Python executable path on remote device.
 

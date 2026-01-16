@@ -269,7 +269,8 @@ class DeviceManager:
             logger.error(f"Failed to add test result: {e}")
             return False
 
-    def _create_windows_profile(self, ssid, password):
+    @staticmethod
+    def _create_windows_profile(ssid, password):
         """
         Generates XML profile for Windows in the resources/wifi_profiles folder.
 
@@ -444,7 +445,8 @@ class DeviceManager:
             )
             return result.stdout
 
-    def run_iperf(self, port=5201):
+    @staticmethod
+    def run_iperf(port=5201):
         """
         Runs iperf3 test using iperf3 from system PATH (both Windows and Linux).
 

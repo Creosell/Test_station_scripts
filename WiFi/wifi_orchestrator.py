@@ -33,7 +33,8 @@ class WiFiTestOrchestrator:
         # Ensure local reports directory exists
         ReportPaths.LOCAL_REPORTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    def _assign_iperf_ports(self):
+    @staticmethod
+    def _assign_iperf_ports():
         """
         Assigns a unique iperf port from the pool to each device in DUTConfig.
         """
@@ -117,7 +118,7 @@ class WiFiTestOrchestrator:
             logger.info(f"Device identified: {system_product_name}")
 
             # Initialize report on DUT
-            remote_report_path = device_executor.init_remote_report(system_product_name, device_ip)
+            remote_report_path = device_executor.init_remote_report(system_product_name, device_name)
 
             if not remote_report_path:
                 logger.error("Failed to initialize remote report, tests will run without reporting")
@@ -281,7 +282,7 @@ class WiFiTestOrchestrator:
                 # Get system info and initialize remote report
                 system_product_name = device_conf["system_product"]
 
-                remote_report_path = executor.init_remote_report(system_product_name, device_conf['ip'])
+                remote_report_path = executor.init_remote_report(system_product_name, device_name)
 
                 device_executors[device_name] = executor
                 remote_report_paths[device_name] = remote_report_path
